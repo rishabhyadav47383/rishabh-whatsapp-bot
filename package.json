@@ -1,0 +1,14 @@
+{
+  "name": "rishabh-ai-whatsapp-userbot",
+  "version": "2.0.0",
+  "description": "Enterprise QR-Code WhatsApp UserBot powered by Google Gemini AI",
+  "main": "src/bot.js",
+  "type": "module",
+  "dependencies": {
+    "whatsapp-web.js": "^1.26.0",
+    "@google/generative-ai": "^0.24.0",
+    "dotenv": "^16.4.5",
+    "qrcode-terminal": "^0.12.0",
+    "node-cron": "^3.0.3"
+  }
+}
