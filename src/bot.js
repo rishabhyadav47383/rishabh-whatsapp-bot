@@ -51,26 +51,16 @@ const server = http.createServer((req, res) => {
         <title>${config.botName} - Online</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-          body { background: #0f172a; color: white; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; padding: 40px 20px; }
-          .card { max-width: 480px; margin: 0 auto; background: #1e293b; border-radius: 24px; padding: 35px 25px; border: 1px solid #334155; box-shadow: 0 20px 40px rgba(0,0,0,0.4); }
-          .badge { background: #22c55e20; color: #4ade80; border: 1px solid #22c55e40; padding: 6px 16px; border-radius: 999px; font-weight: bold; display: inline-block; font-size: 13px; letter-spacing: 0.5px; }
-          h1 { margin: 15px 0 10px; font-size: 26px; }
-          .features { text-align: left; background: #0f172a; border-radius: 16px; padding: 15px 20px; margin-top: 25px; font-size: 13px; color: #94a3b8; line-height: 1.8; }
+          body { background: #0f172a; color: white; font-family: sans-serif; text-align: center; padding: 40px 20px; }
+          .card { max-width: 480px; margin: 0 auto; background: #1e293b; border-radius: 24px; padding: 35px 25px; border: 1px solid #334155; }
+          .badge { background: #22c55e20; color: #4ade80; border: 1px solid #22c55e40; padding: 6px 16px; border-radius: 999px; font-weight: bold; }
         </style>
       </head>
       <body>
         <div class="card">
           <h1>🤖 ${config.botName} (Pro)</h1>
           <p class="badge">● 24/7 ACTIVE & CONNECTED</p>
-          <div class="features">
-            ✨ <b>Active Superpowers:</b><br/>
-            • 🧠 Google Gemini 3.6 Flash AI Chat<br/>
-            • 🎨 AI Image Generator (.imagine)<br/>
-            • 📥 Instagram Reels & YouTube Downloader<br/>
-            • 👁️ Anti-ViewOnce Auto Media Capture<br/>
-            • 🎙️ Audio Voice Notes Transcriber<br/>
-            • 👑 Developed & Owned by <b>${config.ownerName}</b>
-          </div>
+          <p style="color: #94a3b8; margin-top: 20px;">Created & Owned by <b>${config.ownerName}</b></p>
         </div>
       </body>
       </html>
@@ -86,7 +76,7 @@ const server = http.createServer((req, res) => {
         <meta http-equiv="refresh" content="15">
         <style>
           body { background: #0b141a; color: white; font-family: sans-serif; text-align: center; padding: 30px 15px; }
-          .card { max-width: 420px; margin: 0 auto; background: #111b21; border-radius: 24px; padding: 25px; border: 1px solid #222e35; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+          .card { max-width: 420px; margin: 0 auto; background: #111b21; border-radius: 24px; padding: 25px; border: 1px solid #222e35; }
           .qr-box { background: white; padding: 15px; border-radius: 16px; display: inline-block; margin: 20px 0; }
           .steps { text-align: left; background: #202c33; padding: 15px 20px; border-radius: 14px; font-size: 13px; color: #d1d7db; line-height: 1.6; }
         </style>
@@ -126,8 +116,10 @@ server.listen(PORT, () => {
   console.log(`[*] Web QR Viewer running on port ${PORT}`);
 });
 
+// Detect Google Chrome on Linux / Docker
 const chromePath = process.env.PUPPETEER_EXECUTABLE_PATH || (process.platform === 'linux' ? '/usr/bin/google-chrome-stable' : undefined);
 
+// Low-memory optimized client for Render free tier
 const client = new Client({
   authStrategy: new LocalAuth({
     dataPath: './wwebjs_auth',
@@ -146,8 +138,17 @@ const client = new Client({
       '--disable-accelerated-2d-canvas',
       '--no-first-run',
       '--no-zygote',
-      '--single-process',
       '--disable-gpu',
+      '--disable-extensions',
+      '--disable-component-extensions-with-background-pages',
+      '--disable-default-apps',
+      '--mute-audio',
+      '--no-default-browser-check',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
+      '--disable-features=TranslateUI,BlinkGenPropertyTrees',
+      '--js-flags=--max-old-space-size=256',
     ],
   },
 });
@@ -190,7 +191,7 @@ async function sendSafeReply(msg, chatId, text, options = {}) {
   }
 }
 
-// Event: Message Listener (Incoming & Self-Sent)
+// Event: Message Listener
 client.on('message_create', async (msg) => {
   try {
     const chatId = msg.to && msg.fromMe ? msg.to : msg.from;
@@ -201,9 +202,7 @@ client.on('message_create', async (msg) => {
     const isFromMe = msg.fromMe;
     const sender = isFromMe ? config.ownerName : (msg.author || msg.from).replace(/@.+/, '');
 
-    // =========================================================================
-    // 👁️ ANTI-VIEW ONCE PROTECTION (Reveals and preserves View-Once Media)
-    // =========================================================================
+    // Anti-ViewOnce Protection
     const isViewOnce = msg.isViewOnce || msg._data?.isViewOnce || msg.type === 'view_once';
     if (antiViewOnceEnabled && isViewOnce && msg.hasMedia && !isFromMe) {
       try {
@@ -220,7 +219,7 @@ client.on('message_create', async (msg) => {
       }
     }
 
-    // Track chat history for .summary
+    // Chat History Buffer
     if (body) {
       if (!chatHistoryMap.has(chatId)) {
         chatHistoryMap.set(chatId, []);
@@ -234,21 +233,18 @@ client.on('message_create', async (msg) => {
       if (history.length > 25) history.shift();
     }
 
-    // Command Check
+    // Command Parser
     const isCmd = config.prefixes.some((p) => body.startsWith(p));
     const prefix = isCmd ? body[0] : '';
     const command = isCmd ? body.slice(1).trim().split(/ +/)[0].toLowerCase() : '';
     const args = isCmd ? body.slice(1).trim().split(/ +/).slice(1) : [];
     const query = args.join(' ');
 
-    // =========================================================================
-    // 👑 COMMAND DISPATCHER (PREMIUM & EXCLUSIVE SUITE)
-    // =========================================================================
     if (isCmd) {
       console.log(`[*] Command: ${prefix}${command} in ${chatId} from ${sender}`);
 
       switch (command) {
-        // --- 1. LUXURY .menu COMMAND ---
+        // Menu
         case 'menu':
         case 'help': {
           const menuText = `
@@ -284,12 +280,12 @@ _Status: 24/7 Cloud Active_ ⚡
           break;
         }
 
-        // --- 2. AI Image Generator (.imagine / .draw) ---
+        // AI Image Generator
         case 'imagine':
         case 'draw':
         case 'flux': {
           if (!query) {
-            await sendSafeReply(msg, chatId, `🎨 *Usage:* \`${prefix}imagine <prompt>\`\nExample: \`${prefix}imagine Cyberpunk futuristic warrior in neon rain, 8k ultra realistic\``);
+            await sendSafeReply(msg, chatId, `🎨 *Usage:* \`${prefix}imagine <prompt>\`\nExample: \`${prefix}imagine Cyberpunk warrior in neon rain, 8k\``);
             break;
           }
 
@@ -308,12 +304,12 @@ _Status: 24/7 Cloud Active_ ⚡
           break;
         }
 
-        // --- 3. Instagram Reels Downloader (.insta / .ig / .reel) ---
+        // Instagram Reels Downloader
         case 'insta':
         case 'ig':
         case 'reel': {
           if (!query || !query.includes('instagram.com')) {
-            await sendSafeReply(msg, chatId, `📥 *Usage:* \`${prefix}insta <instagram_url>\`\nExample: \`${prefix}insta https://www.instagram.com/reel/C3...\``);
+            await sendSafeReply(msg, chatId, `📥 *Usage:* \`${prefix}insta <instagram_url>\``);
             break;
           }
 
@@ -332,7 +328,7 @@ _Status: 24/7 Cloud Active_ ⚡
           break;
         }
 
-        // --- 4. YouTube MP3 & MP4 Downloader (.ytmp3 / .ytmp4 / .play) ---
+        // YouTube MP3 / MP4
         case 'ytmp3':
         case 'play': {
           if (!query) {
@@ -377,11 +373,11 @@ _Status: 24/7 Cloud Active_ ⚡
           break;
         }
 
-        // --- 5. Gemini AI Query (.ai / .ask) ---
+        // Gemini AI
         case 'ai':
         case 'ask': {
           if (!query) {
-            await sendSafeReply(msg, chatId, `🧠 *Usage:* \`${prefix}ai <query>\`\nExample: \`${prefix}ai Explain Quantum Computing in 3 bullet points\``);
+            await sendSafeReply(msg, chatId, `🧠 *Usage:* \`${prefix}ai <query>\``);
             break;
           }
 
@@ -390,7 +386,7 @@ _Status: 24/7 Cloud Active_ ⚡
           break;
         }
 
-        // --- 6. Chat / Group Summarizer (.summary / .tldr) ---
+        // Summarizer
         case 'summary':
         case 'tldr': {
           const hist = chatHistoryMap.get(chatId) || [];
@@ -405,7 +401,7 @@ _Status: 24/7 Cloud Active_ ⚡
           break;
         }
 
-        // --- 7. Voice Note Transcription (.transcribe) ---
+        // Voice Transcription
         case 'transcribe': {
           let targetMsg = msg;
           if (msg.hasQuotedMsg) {
@@ -428,7 +424,7 @@ _Status: 24/7 Cloud Active_ ⚡
           break;
         }
 
-        // --- 8. Sticker Maker (.sticker / .s) ---
+        // Sticker Maker
         case 'sticker':
         case 's': {
           let targetMsg = msg;
@@ -453,21 +449,21 @@ _Status: 24/7 Cloud Active_ ⚡
           break;
         }
 
-        // --- 9. Auto-Reply Toggle (.autoreply on/off) ---
+        // Auto-reply
         case 'autoreply': {
           if (args[0] === 'on') {
             autoReplyEnabled = true;
-            await sendSafeReply(msg, chatId, `✅ *Smart AI Assistant Away-Mode is now ON!*\nBot will politely handle incoming DMs while you are offline.`);
+            await sendSafeReply(msg, chatId, `✅ *Smart AI Assistant Away-Mode is now ON!*`);
           } else if (args[0] === 'off') {
             autoReplyEnabled = false;
             await sendSafeReply(msg, chatId, `❌ *Smart AI Auto-Reply is now OFF.*`);
           } else {
-            await sendSafeReply(msg, chatId, `Status: *${autoReplyEnabled ? 'ON' : 'OFF'}*\nUsage: \`${prefix}autoreply on\` or \`${prefix}autoreply off\``);
+            await sendSafeReply(msg, chatId, `Status: *${autoReplyEnabled ? 'ON' : 'OFF'}*\nUsage: \`${prefix}autoreply on/off\``);
           }
           break;
         }
 
-        // --- 10. Anti-ViewOnce Toggle (.antiviewonce on/off) ---
+        // Anti-ViewOnce
         case 'antiviewonce': {
           if (args[0] === 'on') {
             antiViewOnceEnabled = true;
@@ -481,14 +477,14 @@ _Status: 24/7 Cloud Active_ ⚡
           break;
         }
 
-        // --- 11. Scheduled Reminders (.reminder 10m Call client) ---
+        // Reminders
         case 'reminder':
         case 'remind': {
           const durationStr = args[0];
           const taskText = args.slice(1).join(' ');
 
           if (!durationStr || !taskText) {
-            await sendSafeReply(msg, chatId, `⚠️ *Usage:* \`${prefix}reminder <duration> <task>\`\nExamples:\n• \`${prefix}reminder 10m Call Rahul\`\n• \`${prefix}reminder 1h Submit project\``);
+            await sendSafeReply(msg, chatId, `⚠️ *Usage:* \`${prefix}reminder <duration> <task>\``);
             break;
           }
 
@@ -507,7 +503,7 @@ _Status: 24/7 Cloud Active_ ⚡
           break;
         }
 
-        // --- 12. Group TagAll (.tagall <announcement>) ---
+        // TagAll
         case 'tagall': {
           if (!isGroup) {
             await sendSafeReply(msg, chatId, `⚠️ Ye command sirf Groups me kaam karta hai.`);
@@ -534,13 +530,13 @@ _Status: 24/7 Cloud Active_ ⚡
           break;
         }
 
-        // --- 13. Ping / Latency ---
+        // Ping
         case 'ping': {
           const start = Date.now();
           await sendSafeReply(
             msg,
             chatId,
-            `🏓 *Pong!*\n⚡ *Latency:* ${Date.now() - start}ms\n🤖 *Bot:* ${config.botName} (Pro Edition)\n👑 *Owner:* ${config.ownerName}`
+            `🏓 *Pong!*\n⚡ *Latency:* ${Date.now() - start}ms\n🤖 *Bot:* ${config.botName}\n👑 *Owner:* ${config.ownerName}`
           );
           break;
         }
@@ -550,9 +546,7 @@ _Status: 24/7 Cloud Active_ ⚡
       }
     }
 
-    // =========================================================================
-    // 🌟 ULTRA-PREMIUM AWAY AUTO-REPLY MESSAGE (When offline/busy)
-    // =========================================================================
+    // Ultra-Premium Away Message
     else if (autoReplyEnabled && !isGroup && !isFromMe && body) {
       const awayMessage = `
 ╭━━━━━━━━━━━━━━━━━━━━━━╮
