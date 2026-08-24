@@ -126,7 +126,8 @@ server.listen(PORT, () => {
   console.log(`[*] Web QR Viewer running on port ${PORT}`);
 });
 
-// Initialize WhatsApp Web Client with Anti-Crash
+const chromePath = process.env.PUPPETEER_EXECUTABLE_PATH || (process.platform === 'linux' ? '/usr/bin/google-chrome-stable' : undefined);
+
 const client = new Client({
   authStrategy: new LocalAuth({
     dataPath: './wwebjs_auth',
@@ -137,6 +138,7 @@ const client = new Client({
   },
   puppeteer: {
     headless: true,
+    executablePath: chromePath,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -144,6 +146,7 @@ const client = new Client({
       '--disable-accelerated-2d-canvas',
       '--no-first-run',
       '--no-zygote',
+      '--single-process',
       '--disable-gpu',
     ],
   },
