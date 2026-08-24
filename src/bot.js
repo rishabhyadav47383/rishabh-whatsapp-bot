@@ -1,3 +1,4 @@
+import http from 'http';
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth, MessageMedia } = pkg;
 import qrcode from 'qrcode-terminal';
@@ -8,6 +9,11 @@ import {
   analyzeImage,
   summarizeConversation,
 } from './gemini.js';
+import {
+  generateAiImage,
+  downloadInstagramReel,
+  downloadYouTube,
+} from './utils/mediaDownloader.js';
 import { reminderManager } from './utils/reminderManager.js';
 
 console.log(`
@@ -19,7 +25,7 @@ console.log(`
  | | \\ \\ _| |_ ____) | |  | |/ ____ \\| |_) | |  | |  / ____ \\ _| |_ 
  |_|  \\_\\_____|_____/|_|  |_/_/    \\_\\____/|_|  |_| /_/    \\_\\_____|
 ================================================================================
-  🤖 ${config.botName} - Real Phone Number WhatsApp UserBot
+  🤖 ${config.botName} - Ultra-Premium Real WhatsApp UserBot
   👑 Creator & Owner:     ${config.ownerName}
   🏢 Organization:        ${config.businessName}
   🧠 AI Brain:            ${config.geminiModel}
@@ -27,10 +33,100 @@ console.log(`
 `);
 
 // State
+let latestQr = null;
+let isConnected = false;
 let autoReplyEnabled = config.autoReplyDefault;
-const chatHistoryMap = new Map(); // chatId -> Array of {sender, text, time}
+let antiViewOnceEnabled = true;
+const chatHistoryMap = new Map();
 
-// Initialize WhatsApp Web Client with persistent LocalAuth & Anti-Crash settings
+// Built-in Web QR Code Server
+const PORT = process.env.PORT || 8000;
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  if (isConnected) {
+    res.end(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>${config.botName} - Online</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body { background: #0f172a; color: white; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; padding: 40px 20px; }
+          .card { max-width: 480px; margin: 0 auto; background: #1e293b; border-radius: 24px; padding: 35px 25px; border: 1px solid #334155; box-shadow: 0 20px 40px rgba(0,0,0,0.4); }
+          .badge { background: #22c55e20; color: #4ade80; border: 1px solid #22c55e40; padding: 6px 16px; border-radius: 999px; font-weight: bold; display: inline-block; font-size: 13px; letter-spacing: 0.5px; }
+          h1 { margin: 15px 0 10px; font-size: 26px; }
+          .features { text-align: left; background: #0f172a; border-radius: 16px; padding: 15px 20px; margin-top: 25px; font-size: 13px; color: #94a3b8; line-height: 1.8; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h1>🤖 ${config.botName} (Pro)</h1>
+          <p class="badge">● 24/7 ACTIVE & CONNECTED</p>
+          <div class="features">
+            ✨ <b>Active Superpowers:</b><br/>
+            • 🧠 Google Gemini 3.6 Flash AI Chat<br/>
+            • 🎨 AI Image Generator (.imagine)<br/>
+            • 📥 Instagram Reels & YouTube Downloader<br/>
+            • 👁️ Anti-ViewOnce Auto Media Capture<br/>
+            • 🎙️ Audio Voice Notes Transcriber<br/>
+            • 👑 Developed & Owned by <b>${config.ownerName}</b>
+          </div>
+        </div>
+      </body>
+      </html>
+    `);
+  } else if (latestQr) {
+    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(latestQr)}`;
+    res.end(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Scan QR - ${config.botName}</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta http-equiv="refresh" content="15">
+        <style>
+          body { background: #0b141a; color: white; font-family: sans-serif; text-align: center; padding: 30px 15px; }
+          .card { max-width: 420px; margin: 0 auto; background: #111b21; border-radius: 24px; padding: 25px; border: 1px solid #222e35; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+          .qr-box { background: white; padding: 15px; border-radius: 16px; display: inline-block; margin: 20px 0; }
+          .steps { text-align: left; background: #202c33; padding: 15px 20px; border-radius: 14px; font-size: 13px; color: #d1d7db; line-height: 1.6; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h2 style="margin: 0; color: #25d366;">📲 Link ${config.botName}</h2>
+          <p style="color: #8696a0; font-size: 13px; margin: 5px 0 15px;">Scan this QR code from WhatsApp on your phone</p>
+          <div class="qr-box">
+            <img src="${qrImageUrl}" alt="WhatsApp QR Code" width="260" height="260" style="display:block;" />
+          </div>
+          <div class="steps">
+            <b>How to scan:</b><br/>
+            1. Open WhatsApp on your phone<br/>
+            2. Tap <b>Settings / 3-Dots > Linked Devices</b><br/>
+            3. Tap <b>Link a Device</b> and point at this QR
+          </div>
+        </div>
+      </body>
+      </html>
+    `);
+  } else {
+    res.end(`
+      <!DOCTYPE html>
+      <html>
+      <head><meta http-equiv="refresh" content="3"></head>
+      <body style="background:#0f172a;color:white;font-family:sans-serif;text-align:center;padding:50px;">
+        <h2>⏳ Starting WhatsApp engine...</h2>
+        <p style="color:#94a3b8;">Generating QR code, please wait 5 seconds...</p>
+      </body>
+      </html>
+    `);
+  }
+});
+
+server.listen(PORT, () => {
+  console.log(`[*] Web QR Viewer running on port ${PORT}`);
+});
+
+// Initialize WhatsApp Web Client with Anti-Crash
 const client = new Client({
   authStrategy: new LocalAuth({
     dataPath: './wwebjs_auth',
@@ -55,31 +151,30 @@ const client = new Client({
 
 // Event 1: QR Code Generation
 client.on('qr', (qr) => {
-  console.log('\n📲 [QR CODE GENERATED] Scan this QR Code with your WhatsApp:');
-  console.log('   1. Open WhatsApp on your phone');
-  console.log('   2. Tap Menu / Settings > Linked Devices > Link a Device');
-  console.log('   3. Point your camera at this QR code:\n');
+  latestQr = qr;
+  console.log('\n📲 [QR CODE GENERATED] Terminal QR:');
   qrcode.generate(qr, { small: true });
 });
 
 // Event 2: Authenticated & Ready
 client.on('ready', () => {
+  isConnected = true;
+  latestQr = null;
   console.log(`\n🎉 [SUCCESS] Rishabh AI is now LIVE on your WhatsApp account!`);
   console.log(`👑 Owner: ${config.ownerName}`);
   console.log(`💡 Type .menu in any chat or group to see your AI superpowers!\n`);
 });
 
-// Event 3: Authentication failure
 client.on('auth_failure', (msg) => {
   console.error('[-] Authentication failure:', msg);
 });
 
-// Event 4: Disconnected
 client.on('disconnected', (reason) => {
+  isConnected = false;
   console.log('[!] Client was disconnected:', reason);
 });
 
-// Helper to safely send reply without crashing on getChat()
+// Helper to safely send reply
 async function sendSafeReply(msg, chatId, text, options = {}) {
   try {
     return await msg.reply(text);
@@ -92,10 +187,9 @@ async function sendSafeReply(msg, chatId, text, options = {}) {
   }
 }
 
-// Event 5: Handle Messages (both incoming from others and self-sent from phone)
+// Event: Message Listener (Incoming & Self-Sent)
 client.on('message_create', async (msg) => {
   try {
-    // Direct Chat ID extraction without calling getChat()
     const chatId = msg.to && msg.fromMe ? msg.to : msg.from;
     if (!chatId || chatId.includes('status@broadcast')) return;
 
@@ -104,7 +198,26 @@ client.on('message_create', async (msg) => {
     const isFromMe = msg.fromMe;
     const sender = isFromMe ? config.ownerName : (msg.author || msg.from).replace(/@.+/, '');
 
-    // Track chat history for .summary command
+    // =========================================================================
+    // 👁️ ANTI-VIEW ONCE PROTECTION (Reveals and preserves View-Once Media)
+    // =========================================================================
+    const isViewOnce = msg.isViewOnce || msg._data?.isViewOnce || msg.type === 'view_once';
+    if (antiViewOnceEnabled && isViewOnce && msg.hasMedia && !isFromMe) {
+      try {
+        const media = await msg.downloadMedia();
+        if (media) {
+          console.log(`[!] Captured ViewOnce media from: ${sender}`);
+          await client.sendMessage(chatId, media, {
+            caption: `👁️ *[ANTI-VIEW ONCE CAPTURE]*\nCaptured secret View-Once media from: @${sender}\n\n👑 _Protected by ${config.botName}_`,
+            mentions: [msg.author || msg.from],
+          });
+        }
+      } catch (voErr) {
+        console.error('Anti-ViewOnce error:', voErr);
+      }
+    }
+
+    // Track chat history for .summary
     if (body) {
       if (!chatHistoryMap.has(chatId)) {
         chatHistoryMap.set(chatId, []);
@@ -118,7 +231,7 @@ client.on('message_create', async (msg) => {
       if (history.length > 25) history.shift();
     }
 
-    // Check for Command Prefix (e.g. .ai or !ai)
+    // Command Check
     const isCmd = config.prefixes.some((p) => body.startsWith(p));
     const prefix = isCmd ? body[0] : '';
     const command = isCmd ? body.slice(1).trim().split(/ +/)[0].toLowerCase() : '';
@@ -126,58 +239,146 @@ client.on('message_create', async (msg) => {
     const query = args.join(' ');
 
     // =========================================================================
-    // COMMAND DISPATCHER
+    // 👑 COMMAND DISPATCHER (PREMIUM & EXCLUSIVE SUITE)
     // =========================================================================
     if (isCmd) {
-      console.log(`[*] Received command: ${prefix}${command} in ${chatId} from ${sender}`);
+      console.log(`[*] Command: ${prefix}${command} in ${chatId} from ${sender}`);
 
       switch (command) {
-        // --- 1. Menu / Help ---
+        // --- 1. LUXURY .menu COMMAND ---
         case 'menu':
         case 'help': {
           const menuText = `
-👑 *${config.botName.toUpperCase()} - COMMAND MENU*
-_Developed & Owned by ${config.ownerName}_
-────────────────────────
-🧠 *AI SUPERPOWERS:*
-• *.ai <query>* : Ask Gemini anything
-• *.ask <query>* : Conversational assistant
-• *.summary* : Summarize last 20 messages of this chat
-• *.transcribe* : Reply to voice note to transcribe
-• *.ocr* : Extract text from photo / screenshot
+╭━━━━━━━━━━━━━━━━━━━━━━━━╮
+  👑 *${config.botName.toUpperCase()} - PRO SUITE* 👑
+╰━━━━━━━━━━━━━━━━━━━━━━━━╯
+_Owner & Developer: ${config.ownerName}_
+_Status: 24/7 Cloud Active_ ⚡
 
-🎨 *MEDIA & CREATIVE:*
-• *.sticker* / *.s* : Reply to photo to make instant Sticker
+🧠 *AI BRAIN & INTELLIGENCE*
+ ├ • \`${prefix}ai <query>\` : Gemini 3.6 AI Engine
+ ├ • \`${prefix}imagine <prompt>\` : DALL-E / Flux AI Art Maker
+ ├ • \`${prefix}summary\` : Chat / Group AI Recap (TL;DR)
+ └ • \`${prefix}transcribe\` : Voice Note to Text Converter
 
-⚙️ *OWNER & AUTOMATION:*
-• *.autoreply on/off* : Toggle Smart AI Auto-Reply
-• *.reminder <time> <task>* : Set WhatsApp reminder (e.g. .reminder 10m Call client)
-• *.tagall <msg>* : (Group) Tag all group members
-• *.ping* : Check bot speed & response latency
+📥 *MEDIA & SOCIAL DOWNLOADER*
+ ├ • \`${prefix}insta <url>\` : Instagram Reels & Videos
+ ├ • \`${prefix}ytmp3 <url>\` : YouTube High-Quality Audio
+ ├ • \`${prefix}ytmp4 <url>\` : YouTube Video Downloader
+ └ • \`${prefix}sticker\` : Instant Photo-to-Sticker Maker
 
-────────────────────────
-🚀 _Powered by Google Gemini 3.6 Flash_
+👑 *OWNER PREMIUM CONTROLS*
+ ├ • \`${prefix}autoreply on/off\` : Smart Away Assistant Mode
+ ├ • \`${prefix}antiviewonce on/off\` : View-Once Auto Capture
+ ├ • \`${prefix}reminder <time> <task>\` : Auto WhatsApp Reminder
+ ├ • \`${prefix}tagall <msg>\` : (Group) Stylish Member Tagging
+ └ • \`${prefix}ping\` : Check Ultra-Low Bot Latency
+
+──────────────────────────
+🚀 _Exclusive AI Ecosystem by ${config.ownerName}_
 `;
           await sendSafeReply(msg, chatId, menuText);
           break;
         }
 
-        // --- 2. Ping / Latency ---
-        case 'ping': {
-          const start = Date.now();
-          await sendSafeReply(
-            msg,
-            chatId,
-            `🏓 *Pong!*\n⚡ *Latency:* ${Date.now() - start}ms\n🤖 *Bot:* ${config.botName}\n👑 *Owner:* ${config.ownerName}`
-          );
+        // --- 2. AI Image Generator (.imagine / .draw) ---
+        case 'imagine':
+        case 'draw':
+        case 'flux': {
+          if (!query) {
+            await sendSafeReply(msg, chatId, `🎨 *Usage:* \`${prefix}imagine <prompt>\`\nExample: \`${prefix}imagine Cyberpunk futuristic warrior in neon rain, 8k ultra realistic\``);
+            break;
+          }
+
+          await sendSafeReply(msg, chatId, `🎨 *Generating your AI image with Flux AI...*\n_Prompt:_ "${query}" ⏳`);
+          const imgBuffer = await generateAiImage(query);
+
+          if (imgBuffer) {
+            const base64Data = imgBuffer.toString('base64');
+            const media = new MessageMedia('image/jpeg', base64Data, 'ai_generated.jpg');
+            await client.sendMessage(chatId, media, {
+              caption: `✨ *AI IMAGE GENERATION*\n📝 *Prompt:* ${query}\n\n👑 _Generated by ${config.botName}_`,
+            });
+          } else {
+            await sendSafeReply(msg, chatId, '⚠️ Image generate karne me dikkat aayi. Kripya dobara try karein.');
+          }
           break;
         }
 
-        // --- 3. Gemini AI Query (.ai / .ask) ---
+        // --- 3. Instagram Reels Downloader (.insta / .ig / .reel) ---
+        case 'insta':
+        case 'ig':
+        case 'reel': {
+          if (!query || !query.includes('instagram.com')) {
+            await sendSafeReply(msg, chatId, `📥 *Usage:* \`${prefix}insta <instagram_url>\`\nExample: \`${prefix}insta https://www.instagram.com/reel/C3...\``);
+            break;
+          }
+
+          await sendSafeReply(msg, chatId, `📥 *Downloading Instagram Reel...* ⏳`);
+          const dlResult = await downloadInstagramReel(query);
+
+          if (dlResult && dlResult.buffer) {
+            const base64Data = dlResult.buffer.toString('base64');
+            const media = new MessageMedia('video/mp4', base64Data, 'instagram_reel.mp4');
+            await client.sendMessage(chatId, media, {
+              caption: `🎥 *INSTAGRAM REEL DOWNLOADED*\n\n👑 _Downloaded by ${config.botName}_`,
+            });
+          } else {
+            await sendSafeReply(msg, chatId, `⚠️ Reel download nahi ho saki. Kripya check karein ki link public ho.`);
+          }
+          break;
+        }
+
+        // --- 4. YouTube MP3 & MP4 Downloader (.ytmp3 / .ytmp4 / .play) ---
+        case 'ytmp3':
+        case 'play': {
+          if (!query) {
+            await sendSafeReply(msg, chatId, `🎵 *Usage:* \`${prefix}ytmp3 <youtube_link>\``);
+            break;
+          }
+
+          await sendSafeReply(msg, chatId, `🎵 *Downloading YouTube Audio (MP3)...* ⏳`);
+          const ytResult = await downloadYouTube(query, 'mp3');
+
+          if (ytResult && ytResult.buffer) {
+            const base64Data = ytResult.buffer.toString('base64');
+            const media = new MessageMedia('audio/mp3', base64Data, `${ytResult.title}.mp3`);
+            await client.sendMessage(chatId, media, {
+              caption: `🎶 *${ytResult.title}*\n👑 _Downloaded by ${config.botName}_`,
+            });
+          } else {
+            await sendSafeReply(msg, chatId, `⚠️ YouTube audio download failed. Kripya valid YouTube link daalein.`);
+          }
+          break;
+        }
+
+        case 'ytmp4':
+        case 'yt': {
+          if (!query) {
+            await sendSafeReply(msg, chatId, `🎬 *Usage:* \`${prefix}ytmp4 <youtube_link>\``);
+            break;
+          }
+
+          await sendSafeReply(msg, chatId, `🎬 *Downloading YouTube Video...* ⏳`);
+          const ytResult = await downloadYouTube(query, 'mp4');
+
+          if (ytResult && ytResult.buffer) {
+            const base64Data = ytResult.buffer.toString('base64');
+            const media = new MessageMedia('video/mp4', base64Data, `${ytResult.title}.mp4`);
+            await client.sendMessage(chatId, media, {
+              caption: `🎥 *${ytResult.title}*\n👑 _Downloaded by ${config.botName}_`,
+            });
+          } else {
+            await sendSafeReply(msg, chatId, `⚠️ YouTube video download failed.`);
+          }
+          break;
+        }
+
+        // --- 5. Gemini AI Query (.ai / .ask) ---
         case 'ai':
         case 'ask': {
           if (!query) {
-            await sendSafeReply(msg, chatId, `⚠️ *Kripya sawal poochein!*\nExample: \`${prefix}ai What is artificial intelligence?\``);
+            await sendSafeReply(msg, chatId, `🧠 *Usage:* \`${prefix}ai <query>\`\nExample: \`${prefix}ai Explain Quantum Computing in 3 bullet points\``);
             break;
           }
 
@@ -186,7 +387,7 @@ _Developed & Owned by ${config.ownerName}_
           break;
         }
 
-        // --- 4. Chat / Group Summarizer (.summary / .tldr) ---
+        // --- 6. Chat / Group Summarizer (.summary / .tldr) ---
         case 'summary':
         case 'tldr': {
           const hist = chatHistoryMap.get(chatId) || [];
@@ -201,7 +402,7 @@ _Developed & Owned by ${config.ownerName}_
           break;
         }
 
-        // --- 5. Voice Note Transcription (.transcribe) ---
+        // --- 7. Voice Note Transcription (.transcribe) ---
         case 'transcribe': {
           let targetMsg = msg;
           if (msg.hasQuotedMsg) {
@@ -224,7 +425,7 @@ _Developed & Owned by ${config.ownerName}_
           break;
         }
 
-        // --- 6. Sticker Maker (.sticker / .s) ---
+        // --- 8. Sticker Maker (.sticker / .s) ---
         case 'sticker':
         case 's': {
           let targetMsg = msg;
@@ -249,37 +450,11 @@ _Developed & Owned by ${config.ownerName}_
           break;
         }
 
-        // --- 7. Image Analysis & OCR (.ocr / .img) ---
-        case 'ocr':
-        case 'img': {
-          let targetMsg = msg;
-          if (msg.hasQuotedMsg) {
-            targetMsg = await msg.getQuotedMessage();
-          }
-
-          if (targetMsg.hasMedia && targetMsg.type === 'image') {
-            const media = await targetMsg.downloadMedia();
-            if (media) {
-              const buffer = Buffer.from(media.data, 'base64');
-              const analysis = await analyzeImage(
-                buffer,
-                query || 'Extract all text and describe this image clearly.'
-              );
-              await sendSafeReply(msg, chatId, `🖼️ *IMAGE ANALYSIS:*\n\n${analysis}`);
-            } else {
-              await sendSafeReply(msg, chatId, '⚠️ Failed to download image.');
-            }
-          } else {
-            await sendSafeReply(msg, chatId, `⚠️ Kripya photo par reply karke \`${prefix}ocr\` ya \`${prefix}img <prompt>\` likhein.`);
-          }
-          break;
-        }
-
-        // --- 8. Auto-Reply Toggle (.autoreply on/off) ---
+        // --- 9. Auto-Reply Toggle (.autoreply on/off) ---
         case 'autoreply': {
           if (args[0] === 'on') {
             autoReplyEnabled = true;
-            await sendSafeReply(msg, chatId, `✅ *Smart AI Auto-Reply is now ON!*\nBot will intelligently reply to private DMs when you are away.`);
+            await sendSafeReply(msg, chatId, `✅ *Smart AI Assistant Away-Mode is now ON!*\nBot will politely handle incoming DMs while you are offline.`);
           } else if (args[0] === 'off') {
             autoReplyEnabled = false;
             await sendSafeReply(msg, chatId, `❌ *Smart AI Auto-Reply is now OFF.*`);
@@ -289,7 +464,21 @@ _Developed & Owned by ${config.ownerName}_
           break;
         }
 
-        // --- 9. Scheduled Reminders (.reminder 10m Call client) ---
+        // --- 10. Anti-ViewOnce Toggle (.antiviewonce on/off) ---
+        case 'antiviewonce': {
+          if (args[0] === 'on') {
+            antiViewOnceEnabled = true;
+            await sendSafeReply(msg, chatId, `👁️ *Anti-ViewOnce Protection is now ENABLED!*`);
+          } else if (args[0] === 'off') {
+            antiViewOnceEnabled = false;
+            await sendSafeReply(msg, chatId, `❌ *Anti-ViewOnce Protection is DISABLED.*`);
+          } else {
+            await sendSafeReply(msg, chatId, `Anti-ViewOnce Status: *${antiViewOnceEnabled ? 'ON' : 'OFF'}*\nUsage: \`${prefix}antiviewonce on/off\``);
+          }
+          break;
+        }
+
+        // --- 11. Scheduled Reminders (.reminder 10m Call client) ---
         case 'reminder':
         case 'remind': {
           const durationStr = args[0];
@@ -315,7 +504,7 @@ _Developed & Owned by ${config.ownerName}_
           break;
         }
 
-        // --- 10. Group TagAll (.tagall <announcement>) ---
+        // --- 12. Group TagAll (.tagall <announcement>) ---
         case 'tagall': {
           if (!isGroup) {
             await sendSafeReply(msg, chatId, `⚠️ Ye command sirf Groups me kaam karta hai.`);
@@ -342,17 +531,41 @@ _Developed & Owned by ${config.ownerName}_
           break;
         }
 
+        // --- 13. Ping / Latency ---
+        case 'ping': {
+          const start = Date.now();
+          await sendSafeReply(
+            msg,
+            chatId,
+            `🏓 *Pong!*\n⚡ *Latency:* ${Date.now() - start}ms\n🤖 *Bot:* ${config.botName} (Pro Edition)\n👑 *Owner:* ${config.ownerName}`
+          );
+          break;
+        }
+
         default:
           break;
       }
     }
 
     // =========================================================================
-    // AUTO-REPLY IN PRIVATE DMS (When enabled and not sent by me)
+    // 🌟 ULTRA-PREMIUM AWAY AUTO-REPLY MESSAGE (When offline/busy)
     // =========================================================================
     else if (autoReplyEnabled && !isGroup && !isFromMe && body) {
-      const aiReply = await askGemini(body, sender);
-      await sendSafeReply(msg, chatId, aiReply);
+      const awayMessage = `
+╭━━━━━━━━━━━━━━━━━━━━━━╮
+  ⚡ *${config.botName.toUpperCase()} ASSISTANT* ⚡
+╰━━━━━━━━━━━━━━━━━━━━━━╯
+👋 *Namaste!*
+
+Main *${config.ownerName}* ka personal AI assistant hoon. Abhi ${config.ownerName} *offline / busy* hain.
+
+⏳ *Kripya thoda intezar karein,* wo aapse jald hi reply karenge!
+
+💡 _Agar koi urgent query hai, to aap yahan message chhod sakte hain ya mujhse baat karne ke liye_ \`.ai <aapka sawal>\` _likhein!_
+────────────────────────
+👑 _${config.businessName}_
+`;
+      await sendSafeReply(msg, chatId, awayMessage);
     }
   } catch (err) {
     console.error('Error handling message:', err);
