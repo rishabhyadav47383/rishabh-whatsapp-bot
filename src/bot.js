@@ -40,7 +40,7 @@ let latestQr = null;
 let isConnected = false;
 let autoReplyEnabled = config.autoReplyDefault;
 let antiViewOnceEnabled = true;
-let currentAiMode = 'default'; // 'default' | 'business' | 'savage' | 'coder'
+let currentAiMode = 'default';
 const chatHistoryMap = new Map();
 const autoRepliedUsers = new Set();
 
@@ -217,20 +217,39 @@ client.on('message_create', async (msg) => {
     const isFromMe = msg.fromMe;
     const sender = isFromMe ? config.ownerName : (msg.author || msg.from).replace(/@.+/, '');
 
-    // Anti-ViewOnce Protection
-    const isViewOnce = msg.isViewOnce || msg._data?.isViewOnce || msg.type === 'view_once';
-    if (antiViewOnceEnabled && isViewOnce && msg.hasMedia && !isFromMe) {
+    // =========================================================================
+    // 👁️ 100% RELIABLE ANTI-VIEW ONCE AUTO CAPTURE
+    // =========================================================================
+    const isViewOnce = msg.isViewOnce || 
+                       msg._data?.isViewOnce || 
+                       msg._data?.viewOnce ||
+                       msg._data?.isViewOnceMedia || 
+                       msg._data?.isViewOnceV2 || 
+                       msg._data?.viewMode === 'VIEW_ONCE' ||
+                       msg.type === 'view_once' ||
+                       msg.type === 'ephemeral';
+
+    if (antiViewOnceEnabled && isViewOnce) {
       try {
+        console.log(`\n👁️ [ANTI-VIEW ONCE DETECTED] Incoming ViewOnce message from: ${sender}`);
+        if (msg._data) {
+          msg._data.isViewOnce = false;
+          msg._data.viewOnce = false;
+        }
+        msg.isViewOnce = false;
+
         const media = await msg.downloadMedia();
         if (media) {
-          console.log(`[!] Captured ViewOnce media from: ${sender}`);
+          console.log(`✅ Successfully captured View-Once media (${media.mimetype})! Revealing in chat...`);
           await client.sendMessage(chatId, media, {
-            caption: `👁️ *[ANTI-VIEW ONCE CAPTURE]*\nCaptured secret View-Once media from: @${sender}\n\n👑 _Protected by ${config.botName}_`,
-            mentions: [msg.author || msg.from],
+            caption: `👁️ *[ANTI-VIEW ONCE AUTO CAPTURE]*\nCaptured secret View-Once media from: @${sender}\n\n👑 _Protected by ${config.botName}_`,
+            mentions: msg.author || msg.from ? [msg.author || msg.from] : [],
           });
+        } else {
+          console.log('⚠️ Could not download view-once media buffer.');
         }
       } catch (voErr) {
-        console.error('Anti-ViewOnce error:', voErr);
+        console.error('Anti-ViewOnce auto-capture error:', voErr);
       }
     }
 
@@ -273,6 +292,7 @@ _AI Mode: [${currentAiMode.toUpperCase()}]_ ⚡
  ├ • \`${prefix}true <number>\` : Truecaller Number & Telecom Intel
  ├ • \`${prefix}say <text>\` : AI Voice Note Generator (Speaker)
  ├ • \`${prefix}crypto\` : Live Bitcoin, ETH & Solana Rates
+ └ • \`${prefix}vo\` : (Reply) Decrypt View-Once Photo/Video
 
 🧠 *AI BRAIN & CREATIVE*
  ├ • \`${prefix}ai <query>\` : Gemini 3.6 Flash Engine
@@ -301,7 +321,38 @@ _AI Mode: [${currentAiMode.toUpperCase()}]_ ⚡
           break;
         }
 
-        // --- 1. TRUECALLER / NUMBER LOOKUP ---
+        // --- 1. ON-DEMAND VIEW ONCE DECRYPTOR (.vo / .antiview) ---
+        case 'vo':
+        case 'antiview':
+        case 'readvo': {
+          let targetMsg = msg;
+          if (msg.hasQuotedMsg) {
+            targetMsg = await msg.getQuotedMessage();
+          }
+
+          if (targetMsg._data) {
+            targetMsg._data.isViewOnce = false;
+            targetMsg._data.viewOnce = false;
+          }
+          targetMsg.isViewOnce = false;
+
+          await sendSafeReply(msg, chatId, '👁️ *Decrypting View-Once media...* ⏳');
+          try {
+            const media = await targetMsg.downloadMedia();
+            if (media) {
+              await client.sendMessage(chatId, media, {
+                caption: `👁️ *[VIEW-ONCE REVEALED]*\nUnlocked secret View-Once media!\n\n👑 _Decrypted by ${config.botName}_`,
+              });
+            } else {
+              await sendSafeReply(msg, chatId, '⚠️ Media download nahi ho saki. Kripya ensure karein photo chat me maujood ho.');
+            }
+          } catch (err) {
+            await sendSafeReply(msg, chatId, `⚠️ Error decrypting: ${err.message}`);
+          }
+          break;
+        }
+
+        // --- 2. TRUECALLER / NUMBER LOOKUP ---
         case 'true':
         case 'lookup':
         case 'num': {
@@ -334,7 +385,7 @@ _AI Mode: [${currentAiMode.toUpperCase()}]_ ⚡
           break;
         }
 
-        // --- 2. AI VOICE NOTE MAKER (TTS) ---
+        // --- 3. AI VOICE NOTE MAKER (TTS) ---
         case 'say':
         case 'speak':
         case 'voice': {
@@ -354,7 +405,7 @@ _AI Mode: [${currentAiMode.toUpperCase()}]_ ⚡
           break;
         }
 
-        // --- 3. LIVE CRYPTO RATES ---
+        // --- 4. LIVE CRYPTO RATES ---
         case 'crypto':
         case 'btc': {
           await sendSafeReply(msg, chatId, `📈 *Fetching live market rates...* ⏳`);
@@ -389,7 +440,7 @@ _AI Mode: [${currentAiMode.toUpperCase()}]_ ⚡
           break;
         }
 
-        // --- 4. AI PERSONALITY MODE SWITCHER ---
+        // --- 5. AI PERSONALITY MODE SWITCHER ---
         case 'mode': {
           const selected = args[0]?.toLowerCase();
           if (['business', 'savage', 'coder', 'default'].includes(selected)) {
@@ -401,7 +452,7 @@ _AI Mode: [${currentAiMode.toUpperCase()}]_ ⚡
           break;
         }
 
-        // --- 5. AI Image Generator ---
+        // --- 6. AI Image Generator ---
         case 'imagine':
         case 'draw':
         case 'flux': {
@@ -425,7 +476,7 @@ _AI Mode: [${currentAiMode.toUpperCase()}]_ ⚡
           break;
         }
 
-        // --- 6. Instagram Reels Downloader ---
+        // --- 7. Instagram Reels Downloader ---
         case 'insta':
         case 'ig':
         case 'reel': {
@@ -449,7 +500,7 @@ _AI Mode: [${currentAiMode.toUpperCase()}]_ ⚡
           break;
         }
 
-        // --- 7. YouTube MP3 / MP4 ---
+        // --- 8. YouTube MP3 / MP4 ---
         case 'ytmp3':
         case 'play': {
           if (!query) {
@@ -494,7 +545,7 @@ _AI Mode: [${currentAiMode.toUpperCase()}]_ ⚡
           break;
         }
 
-        // --- 8. Gemini AI ---
+        // --- 9. Gemini AI ---
         case 'ai':
         case 'ask': {
           if (!query) {
@@ -507,7 +558,7 @@ _AI Mode: [${currentAiMode.toUpperCase()}]_ ⚡
           break;
         }
 
-        // --- 9. Summarizer ---
+        // --- 10. Summarizer ---
         case 'summary':
         case 'tldr': {
           const hist = chatHistoryMap.get(chatId) || [];
@@ -522,7 +573,7 @@ _AI Mode: [${currentAiMode.toUpperCase()}]_ ⚡
           break;
         }
 
-        // --- 10. Voice Transcription ---
+        // --- 11. Voice Transcription ---
         case 'transcribe': {
           let targetMsg = msg;
           if (msg.hasQuotedMsg) {
@@ -545,7 +596,7 @@ _AI Mode: [${currentAiMode.toUpperCase()}]_ ⚡
           break;
         }
 
-        // --- 11. Sticker Maker ---
+        // --- 12. Sticker Maker ---
         case 'sticker':
         case 's': {
           let targetMsg = msg;
@@ -570,7 +621,7 @@ _AI Mode: [${currentAiMode.toUpperCase()}]_ ⚡
           break;
         }
 
-        // --- 12. Auto-reply ---
+        // --- 13. Auto-reply ---
         case 'autoreply': {
           if (args[0] === 'on') {
             autoReplyEnabled = true;
@@ -586,7 +637,7 @@ _AI Mode: [${currentAiMode.toUpperCase()}]_ ⚡
           break;
         }
 
-        // --- 13. Anti-ViewOnce ---
+        // --- 14. Anti-ViewOnce ---
         case 'antiviewonce': {
           if (args[0] === 'on') {
             antiViewOnceEnabled = true;
@@ -600,7 +651,7 @@ _AI Mode: [${currentAiMode.toUpperCase()}]_ ⚡
           break;
         }
 
-        // --- 14. Reminders ---
+        // --- 15. Reminders ---
         case 'reminder':
         case 'remind': {
           const durationStr = args[0];
@@ -626,7 +677,7 @@ _AI Mode: [${currentAiMode.toUpperCase()}]_ ⚡
           break;
         }
 
-        // --- 15. TagAll ---
+        // --- 16. TagAll ---
         case 'tagall': {
           if (!isGroup) {
             await sendSafeReply(msg, chatId, `⚠️ Ye command sirf Groups me kaam karta hai.`);
@@ -653,7 +704,7 @@ _AI Mode: [${currentAiMode.toUpperCase()}]_ ⚡
           break;
         }
 
-        // --- 16. Ping ---
+        // --- 17. Ping ---
         case 'ping': {
           const start = Date.now();
           await sendSafeReply(
