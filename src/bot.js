@@ -1,4 +1,5 @@
 import http from 'http';
+import https from 'https';
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth, MessageMedia } = pkg;
 import qrcode from 'qrcode-terminal';
@@ -14,6 +15,8 @@ import {
   downloadInstagramReel,
   downloadYouTube,
 } from './utils/mediaDownloader.js';
+import { lookupPhoneNumber } from './utils/numberLookup.js';
+import { getCryptoPrices } from './utils/cryptoRates.js';
 import { reminderManager } from './utils/reminderManager.js';
 
 console.log(`
@@ -37,8 +40,9 @@ let latestQr = null;
 let isConnected = false;
 let autoReplyEnabled = config.autoReplyDefault;
 let antiViewOnceEnabled = true;
+let currentAiMode = 'default'; // 'default' | 'business' | 'savage' | 'coder'
 const chatHistoryMap = new Map();
-const autoRepliedUsers = new Set(); // Tracks users who already received away message (1-time only!)
+const autoRepliedUsers = new Set();
 
 // Built-in Web QR Code Server
 const PORT = process.env.PORT || 8000;
@@ -119,6 +123,20 @@ server.listen(PORT, () => {
 
 // Detect Google Chrome on Linux / Docker
 const chromePath = process.env.PUPPETEER_EXECUTABLE_PATH || (process.platform === 'linux' ? '/usr/bin/google-chrome-stable' : undefined);
+
+// Helper for TTS Voice Notes
+function getTtsBuffer(text, lang = 'hi') {
+  return new Promise((resolve) => {
+    const clean = encodeURIComponent(text.slice(0, 200));
+    const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${clean}&tl=${lang}&client=tw-ob`;
+    https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
+      if (res.statusCode !== 200) return resolve(null);
+      const chunks = [];
+      res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => resolve(Buffer.concat(chunks)));
+    }).on('error', () => resolve(null));
+  });
+}
 
 // WhatsApp Client
 const client = new Client({
@@ -246,14 +264,20 @@ client.on('message_create', async (msg) => {
         case 'help': {
           const menuText = `
 ╭━━━━━━━━━━━━━━━━━━━━━━━━╮
-  👑 *${config.botName.toUpperCase()} - PRO SUITE* 👑
+  👑 *${config.botName.toUpperCase()} - GOD SUITE* 👑
 ╰━━━━━━━━━━━━━━━━━━━━━━━━╯
-_Owner & Developer: ${config.ownerName}_
-_Status: 24/7 Cloud Active_ ⚡
+_Owner & Creator: ${config.ownerName}_
+_AI Mode: [${currentAiMode.toUpperCase()}]_ ⚡
 
-🧠 *AI BRAIN & INTELLIGENCE*
- ├ • \`${prefix}ai <query>\` : Gemini 3.6 AI Engine
- ├ • \`${prefix}imagine <prompt>\` : DALL-E / Flux AI Art Maker
+🕵️‍♂️ *INTELLIGENCE & LOOKUP*
+ ├ • \`${prefix}true <number>\` : Truecaller Number & Telecom Intel
+ ├ • \`${prefix}say <text>\` : AI Voice Note Generator (Speaker)
+ ├ • \`${prefix}crypto\` : Live Bitcoin, ETH & Solana Rates
+
+🧠 *AI BRAIN & CREATIVE*
+ ├ • \`${prefix}ai <query>\` : Gemini 3.6 Flash Engine
+ ├ • \`${prefix}imagine <prompt>\` : Flux AI Photo Generator
+ ├ • \`${prefix}mode <type>\` : Set Mode (business/savage/coder)
  ├ • \`${prefix}summary\` : Chat / Group AI Recap (TL;DR)
  └ • \`${prefix}transcribe\` : Voice Note to Text Converter
 
@@ -268,7 +292,7 @@ _Status: 24/7 Cloud Active_ ⚡
  ├ • \`${prefix}antiviewonce on/off\` : View-Once Auto Capture
  ├ • \`${prefix}reminder <time> <task>\` : Auto WhatsApp Reminder
  ├ • \`${prefix}tagall <msg>\` : (Group) Stylish Member Tagging
- └ • \`${prefix}ping\` : Check Ultra-Low Bot Latency
+ └ • \`${prefix}ping\` : Check Ultra-Low Latency
 
 ──────────────────────────
 🚀 _Exclusive AI Ecosystem by ${config.ownerName}_
@@ -277,7 +301,107 @@ _Status: 24/7 Cloud Active_ ⚡
           break;
         }
 
-        // AI Image Generator
+        // --- 1. TRUECALLER / NUMBER LOOKUP ---
+        case 'true':
+        case 'lookup':
+        case 'num': {
+          if (!query) {
+            await sendSafeReply(msg, chatId, `🕵️‍♂️ *Usage:* \`${prefix}true <phone_number>\`\nExample: \`${prefix}true 9876543210\``);
+            break;
+          }
+
+          await sendSafeReply(msg, chatId, `🔍 *Searching telecom & Truecaller database...* ⏳`);
+          const info = await lookupPhoneNumber(query);
+
+          if (info) {
+            const report = `
+╭━━━━━━━━━━━━━━━━━━━━━━━━╮
+  🕵️‍♂️ *TRUECALLER INTEL REPORT*
+╰━━━━━━━━━━━━━━━━━━━━━━━━╯
+📞 *Phone:* \`${info.number}\`
+🌍 *Country:* ${info.country}
+📡 *Carrier / Operator:* *${info.carrier}*
+📍 *Telecom Circle:* *${info.region}*
+📱 *Line Type:* ${info.lineType}
+🛡️ *Spam Status:* ${info.spamStatus}
+──────────────────────────
+👑 _Intel by ${config.botName}_
+`;
+            await sendSafeReply(msg, chatId, report);
+          } else {
+            await sendSafeReply(msg, chatId, `⚠️ Phone number information fetch nahi ho saki.`);
+          }
+          break;
+        }
+
+        // --- 2. AI VOICE NOTE MAKER (TTS) ---
+        case 'say':
+        case 'speak':
+        case 'voice': {
+          if (!query) {
+            await sendSafeReply(msg, chatId, `🎙️ *Usage:* \`${prefix}say <message>\`\nExample: \`${prefix}say Hello Rishabh bhai, aapka bot ready hai\``);
+            break;
+          }
+
+          const audioBuf = await getTtsBuffer(query);
+          if (audioBuf) {
+            const base64Data = audioBuf.toString('base64');
+            const media = new MessageMedia('audio/mp3', base64Data, 'voice.mp3');
+            await client.sendMessage(chatId, media, { sendAudioAsVoice: true });
+          } else {
+            await sendSafeReply(msg, chatId, '⚠️ Voice generate karne me dikkat aayi.');
+          }
+          break;
+        }
+
+        // --- 3. LIVE CRYPTO RATES ---
+        case 'crypto':
+        case 'btc': {
+          await sendSafeReply(msg, chatId, `📈 *Fetching live market rates...* ⏳`);
+          const prices = await getCryptoPrices();
+          if (prices) {
+            const text = `
+╭━━━━━━━━━━━━━━━━━━━━━━━━╮
+  📈 *LIVE CRYPTO MARKET*
+╰━━━━━━━━━━━━━━━━━━━━━━━━╯
+🪙 *Bitcoin (BTC):*
+ ├ USD: $${prices.btc.usd?.toLocaleString()}
+ ├ INR: ₹${prices.btc.inr?.toLocaleString()}
+ └ 24h Change: ${prices.btc.change}%
+
+💎 *Ethereum (ETH):*
+ ├ USD: $${prices.eth.usd?.toLocaleString()}
+ └ INR: ₹${prices.eth.inr?.toLocaleString()}
+
+⚡ *Solana (SOL):*
+ ├ USD: $${prices.sol.usd?.toLocaleString()}
+ └ INR: ₹${prices.sol.inr?.toLocaleString()}
+
+🐶 *Dogecoin (DOGE):*
+ └ USD: $${prices.doge.usd} (₹${prices.doge.inr})
+──────────────────────────
+👑 _Tracked by ${config.botName}_
+`;
+            await sendSafeReply(msg, chatId, text);
+          } else {
+            await sendSafeReply(msg, chatId, '⚠️ Market rates fetch nahi ho sake.');
+          }
+          break;
+        }
+
+        // --- 4. AI PERSONALITY MODE SWITCHER ---
+        case 'mode': {
+          const selected = args[0]?.toLowerCase();
+          if (['business', 'savage', 'coder', 'default'].includes(selected)) {
+            currentAiMode = selected;
+            await sendSafeReply(msg, chatId, `🎭 *AI Mode changed to: [${selected.toUpperCase()}]*\nAb bot is personality ke sath reply karega! 🔥`);
+          } else {
+            await sendSafeReply(msg, chatId, `Current Mode: *[${currentAiMode.toUpperCase()}]*\n\nAvailable Modes:\n• \`${prefix}mode default\` (Normal)\n• \`${prefix}mode business\` (Client dealing)\n• \`${prefix}mode savage\` (Roasting & Fun)\n• \`${prefix}mode coder\` (Programming expert)`);
+          }
+          break;
+        }
+
+        // --- 5. AI Image Generator ---
         case 'imagine':
         case 'draw':
         case 'flux': {
@@ -301,12 +425,12 @@ _Status: 24/7 Cloud Active_ ⚡
           break;
         }
 
-        // Instagram Reels Downloader
+        // --- 6. Instagram Reels Downloader ---
         case 'insta':
         case 'ig':
         case 'reel': {
           if (!query || !query.includes('instagram.com')) {
-            await sendSafeReply(msg, chatId, `📥 *Usage:* \`${prefix}insta <instagram_reel_url>\`\nExample: \`${prefix}insta https://www.instagram.com/reel/Cxxxxxx/\``);
+            await sendSafeReply(msg, chatId, `📥 *Usage:* \`${prefix}insta <instagram_reel_url>\``);
             break;
           }
 
@@ -325,7 +449,7 @@ _Status: 24/7 Cloud Active_ ⚡
           break;
         }
 
-        // YouTube MP3 / MP4
+        // --- 7. YouTube MP3 / MP4 ---
         case 'ytmp3':
         case 'play': {
           if (!query) {
@@ -370,7 +494,7 @@ _Status: 24/7 Cloud Active_ ⚡
           break;
         }
 
-        // Gemini AI
+        // --- 8. Gemini AI ---
         case 'ai':
         case 'ask': {
           if (!query) {
@@ -378,12 +502,12 @@ _Status: 24/7 Cloud Active_ ⚡
             break;
           }
 
-          const aiReply = await askGemini(query, sender);
+          const aiReply = await askGemini(query, sender, currentAiMode);
           await sendSafeReply(msg, chatId, aiReply);
           break;
         }
 
-        // Summarizer
+        // --- 9. Summarizer ---
         case 'summary':
         case 'tldr': {
           const hist = chatHistoryMap.get(chatId) || [];
@@ -398,7 +522,7 @@ _Status: 24/7 Cloud Active_ ⚡
           break;
         }
 
-        // Voice Transcription
+        // --- 10. Voice Transcription ---
         case 'transcribe': {
           let targetMsg = msg;
           if (msg.hasQuotedMsg) {
@@ -421,7 +545,7 @@ _Status: 24/7 Cloud Active_ ⚡
           break;
         }
 
-        // Sticker Maker
+        // --- 11. Sticker Maker ---
         case 'sticker':
         case 's': {
           let targetMsg = msg;
@@ -446,11 +570,11 @@ _Status: 24/7 Cloud Active_ ⚡
           break;
         }
 
-        // Auto-reply Toggle (with 1-time tracking reset)
+        // --- 12. Auto-reply ---
         case 'autoreply': {
           if (args[0] === 'on') {
             autoReplyEnabled = true;
-            autoRepliedUsers.clear(); // Reset 1-time tracker for new away session
+            autoRepliedUsers.clear();
             await sendSafeReply(msg, chatId, `✅ *Smart AI Assistant Away-Mode is now ON!*\nBot will reply *only once per person* while you are offline.`);
           } else if (args[0] === 'off') {
             autoReplyEnabled = false;
@@ -462,7 +586,7 @@ _Status: 24/7 Cloud Active_ ⚡
           break;
         }
 
-        // Anti-ViewOnce
+        // --- 13. Anti-ViewOnce ---
         case 'antiviewonce': {
           if (args[0] === 'on') {
             antiViewOnceEnabled = true;
@@ -476,7 +600,7 @@ _Status: 24/7 Cloud Active_ ⚡
           break;
         }
 
-        // Reminders
+        // --- 14. Reminders ---
         case 'reminder':
         case 'remind': {
           const durationStr = args[0];
@@ -502,7 +626,7 @@ _Status: 24/7 Cloud Active_ ⚡
           break;
         }
 
-        // TagAll
+        // --- 15. TagAll ---
         case 'tagall': {
           if (!isGroup) {
             await sendSafeReply(msg, chatId, `⚠️ Ye command sirf Groups me kaam karta hai.`);
@@ -529,7 +653,7 @@ _Status: 24/7 Cloud Active_ ⚡
           break;
         }
 
-        // Ping
+        // --- 16. Ping ---
         case 'ping': {
           const start = Date.now();
           await sendSafeReply(
@@ -545,12 +669,10 @@ _Status: 24/7 Cloud Active_ ⚡
       }
     }
 
-    // =========================================================================
-    // 🌟 1-TIME ONLY AWAY AUTO-REPLY MESSAGE (No repetitive spam)
-    // =========================================================================
+    // 1-Time Auto-Reply Away Message
     else if (autoReplyEnabled && !isGroup && !isFromMe && body) {
       if (!autoRepliedUsers.has(chatId)) {
-        autoRepliedUsers.add(chatId); // Mark user as replied!
+        autoRepliedUsers.add(chatId);
         const awayMessage = `
 ╭━━━━━━━━━━━━━━━━━━━━━━╮
   ⚡ *${config.botName.toUpperCase()} ASSISTANT* ⚡

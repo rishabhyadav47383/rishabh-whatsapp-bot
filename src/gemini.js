@@ -10,29 +10,27 @@ export function getGenAI() {
   return genAI;
 }
 
-const SYSTEM_INSTRUCTION = `
-You are ${config.botName}, an ultra-fast, intelligent, and helpful AI assistant created and owned by ${config.ownerName} for ${config.businessName}.
-
-Persona & Communication Rules:
-1. Always communicate fluently in the user's language (Hinglish, Hindi, or English).
-2. Keep replies crisp, well-formatted for WhatsApp (*bold*, _italic_, emojis 🚀, bullet points).
-3. If asked who made you or who is the owner, proudly state: "Mujhe *${config.ownerName}* ne develop kiya hai aur main *${config.businessName}* ka official WhatsApp AI bot hoon! 👑"
-4. Be polite, energetic, and solution-oriented.
-`;
+const MODES = {
+  default: `You are ${config.botName}, an ultra-fast, intelligent, and helpful AI assistant created and owned by ${config.ownerName} for ${config.businessName}. Communicate fluently in natural Hinglish/Hindi/English. Be energetic and helpful.`,
+  business: `You are ${config.botName} in PROFESSIONAL BUSINESS MODE, representing ${config.ownerName} and ${config.businessName}. Communicate with utmost elegance, professionalism, and corporate etiquette. Provide formal, polite, and persuasive solutions to clients.`,
+  savage: `You are ${config.botName} in SAVAGE ROASTER MODE. Created by ${config.ownerName}. Have extreme swag, witty Indian desi humor, clever punchlines, and funny comebacks (friendly roast, no hate speech). Speak in trendy Hinglish with savage emojis 🔥😂.`,
+  coder: `You are ${config.botName} in EXPERT CODER / SOFTWARE ENGINEER MODE. Created by ${config.ownerName}. Provide ultra-clean, production-ready code snippets with syntax highlighting, concise logic explanation, and zero fluff.`
+};
 
 /**
- * Generates an AI response from Gemini.
+ * Generates an AI response from Gemini with Dynamic Personality Mode.
  */
-export async function askGemini(prompt, userPhone = 'User') {
+export async function askGemini(prompt, userPhone = 'User', mode = 'default') {
   const ai = getGenAI();
   if (!ai) {
     return `⚠️ *Gemini API Key missing!* Kripya .env file me valid API key daalein.`;
   }
 
   try {
+    const selectedInstruction = MODES[mode] || MODES.default;
     const model = ai.getGenerativeModel({
       model: config.geminiModel,
-      systemInstruction: SYSTEM_INSTRUCTION,
+      systemInstruction: `${selectedInstruction}\n\nAlways format replies cleanly for WhatsApp (*bold*, _italic_, bullet points). Owner is ${config.ownerName}.`,
     });
 
     const result = await model.generateContent(`[User WhatsApp: ${userPhone}]\n${prompt}`);
@@ -54,37 +52,38 @@ export async function transcribeAudio(audioBuffer, mimeType = 'audio/mp3') {
   try {
     const model = ai.getGenerativeModel({
       model: config.geminiModel,
-      systemInstruction: SYSTEM_INSTRUCTION,
+      systemInstruction: "You are an expert multilingual audio transcriber. Listen carefully and transcribe the speech into accurate text with speaker emotion, language used, and English/Hindi translation if required.",
     });
 
     const result = await model.generateContent([
       {
         inlineData: {
-          mimeType: 'audio/mp3',
+          mimeType: mimeType,
           data: audioBuffer.toString('base64'),
         },
       },
-      "Please listen carefully to this voice note and provide a full, accurate transcript in the original language (Hindi/English/Hinglish) followed by a short 1-line summary.",
+      "Transcribe this voice note / audio into clean readable text. Detect language and give summary.",
     ]);
+
     const response = await result.response;
-    return response.text()?.trim() || "Audio could not be transcribed.";
+    return response.text()?.trim() || "Audio clear nahi tha.";
   } catch (err) {
-    console.error('Transcription Error:', err);
-    return `⚠️ *Transcription Failed:* ${err.message?.slice(0, 100)}`;
+    console.error('Audio Transcription Error:', err);
+    return `⚠️ Audio transcribe karne me dikkat aayi: ${err.message?.slice(0, 100)}`;
   }
 }
 
 /**
- * Analyzes an image with Gemini Vision.
+ * Analyzes an image using Gemini Multimodal.
  */
-export async function analyzeImage(imageBuffer, prompt = 'Explain this image in detail and answer any questions inside it.') {
+export async function analyzeImage(imageBuffer, prompt = "Describe this image in detail and extract any text.") {
   const ai = getGenAI();
   if (!ai) return "⚠️ Gemini API key missing.";
 
   try {
     const model = ai.getGenerativeModel({
       model: config.geminiModel,
-      systemInstruction: SYSTEM_INSTRUCTION,
+      systemInstruction: "You are an expert image & OCR analyzer. Analyze the image with extreme clarity, extract all printed/handwritten text, and explain its contents.",
     });
 
     const result = await model.generateContent([
@@ -96,39 +95,36 @@ export async function analyzeImage(imageBuffer, prompt = 'Explain this image in 
       },
       prompt,
     ]);
+
     const response = await result.response;
-    return response.text()?.trim() || "Image could not be analyzed.";
+    return response.text()?.trim() || "Image analyze nahi ho saki.";
   } catch (err) {
     console.error('Image Analysis Error:', err);
-    return `⚠️ *Image Analysis Error:* ${err.message?.slice(0, 100)}`;
+    return `⚠️ Image analyze karne me error: ${err.message?.slice(0, 100)}`;
   }
 }
 
 /**
- * Summarizes a list of recent conversation messages.
+ * Summarizes chat conversation history.
  */
-export async function summarizeConversation(messagesText) {
+export async function summarizeConversation(historyText) {
   const ai = getGenAI();
   if (!ai) return "⚠️ Gemini API key missing.";
 
   try {
     const model = ai.getGenerativeModel({
       model: config.geminiModel,
-      systemInstruction: SYSTEM_INSTRUCTION,
+      systemInstruction: "You are an executive WhatsApp group & chat summarizer. Summarize recent chat conversations into a crisp, engaging, and structured bulleted recap (TL;DR). Highlight key decisions, tasks, and funny moments.",
     });
 
-    const prompt = `
-Summarize the following recent WhatsApp conversation in concise bullet points:
-Highlight key topics discussed, decisions made, or pending action items. Format in clean WhatsApp Markdown with emojis.
+    const result = await model.generateContent(
+      `Summarize the following WhatsApp chat history into bullet points:\n\n${historyText}`
+    );
 
-Conversation:
-${messagesText}
-`;
-    const result = await model.generateContent(prompt);
     const response = await result.response;
-    return response.text()?.trim() || "Could not generate summary.";
+    return response.text()?.trim() || "Summary generate nahi ho saki.";
   } catch (err) {
     console.error('Summarize Error:', err);
-    return `⚠️ *Summarize Error:* ${err.message?.slice(0, 100)}`;
+    return `⚠️ Summary error: ${err.message?.slice(0, 100)}`;
   }
 }
