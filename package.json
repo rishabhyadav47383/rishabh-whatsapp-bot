@@ -5,10 +5,15 @@
   "main": "src/bot.js",
   "type": "module",
   "dependencies": {
-    "whatsapp-web.js": "^1.26.0",
+    "@distube/ytdl-core": "^4.16.12",
     "@google/generative-ai": "^0.24.0",
+    "@sasmeee/igdl": "^0.0.1-security",
     "dotenv": "^16.4.5",
+    "instagram-url-direct": "^2.0.7",
+    "node-cron": "^3.0.3",
+    "play-dl": "^1.9.7",
     "qrcode-terminal": "^0.12.0",
-    "node-cron": "^3.0.3"
+    "snapsave-media-downloader": "^2.4.1",
+    "whatsapp-web.js": "^1.26.0"
   }
 }

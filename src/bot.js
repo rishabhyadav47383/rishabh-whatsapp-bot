@@ -38,6 +38,7 @@ let isConnected = false;
 let autoReplyEnabled = config.autoReplyDefault;
 let antiViewOnceEnabled = true;
 const chatHistoryMap = new Map();
+const autoRepliedUsers = new Set(); // Tracks users who already received away message (1-time only!)
 
 // Built-in Web QR Code Server
 const PORT = process.env.PORT || 8000;
@@ -119,7 +120,7 @@ server.listen(PORT, () => {
 // Detect Google Chrome on Linux / Docker
 const chromePath = process.env.PUPPETEER_EXECUTABLE_PATH || (process.platform === 'linux' ? '/usr/bin/google-chrome-stable' : undefined);
 
-// Low-memory optimized client for Render free tier
+// WhatsApp Client
 const client = new Client({
   authStrategy: new LocalAuth({
     dataPath: './wwebjs_auth',
@@ -140,27 +141,23 @@ const client = new Client({
       '--no-zygote',
       '--disable-gpu',
       '--disable-extensions',
-      '--disable-component-extensions-with-background-pages',
       '--disable-default-apps',
       '--mute-audio',
       '--no-default-browser-check',
       '--disable-background-timer-throttling',
-      '--disable-backgrounding-occluded-windows',
       '--disable-renderer-backgrounding',
-      '--disable-features=TranslateUI,BlinkGenPropertyTrees',
       '--js-flags=--max-old-space-size=256',
     ],
   },
 });
 
-// Event 1: QR Code Generation
+// Events
 client.on('qr', (qr) => {
   latestQr = qr;
   console.log('\n📲 [QR CODE GENERATED] Terminal QR:');
   qrcode.generate(qr, { small: true });
 });
 
-// Event 2: Authenticated & Ready
 client.on('ready', () => {
   isConnected = true;
   latestQr = null;
@@ -244,7 +241,7 @@ client.on('message_create', async (msg) => {
       console.log(`[*] Command: ${prefix}${command} in ${chatId} from ${sender}`);
 
       switch (command) {
-        // Menu
+        // Luxury Menu
         case 'menu':
         case 'help': {
           const menuText = `
@@ -267,7 +264,7 @@ _Status: 24/7 Cloud Active_ ⚡
  └ • \`${prefix}sticker\` : Instant Photo-to-Sticker Maker
 
 👑 *OWNER PREMIUM CONTROLS*
- ├ • \`${prefix}autoreply on/off\` : Smart Away Assistant Mode
+ ├ • \`${prefix}autoreply on/off\` : Smart Away Assistant (1-Time)
  ├ • \`${prefix}antiviewonce on/off\` : View-Once Auto Capture
  ├ • \`${prefix}reminder <time> <task>\` : Auto WhatsApp Reminder
  ├ • \`${prefix}tagall <msg>\` : (Group) Stylish Member Tagging
@@ -309,11 +306,11 @@ _Status: 24/7 Cloud Active_ ⚡
         case 'ig':
         case 'reel': {
           if (!query || !query.includes('instagram.com')) {
-            await sendSafeReply(msg, chatId, `📥 *Usage:* \`${prefix}insta <instagram_url>\``);
+            await sendSafeReply(msg, chatId, `📥 *Usage:* \`${prefix}insta <instagram_reel_url>\`\nExample: \`${prefix}insta https://www.instagram.com/reel/Cxxxxxx/\``);
             break;
           }
 
-          await sendSafeReply(msg, chatId, `📥 *Downloading Instagram Reel...* ⏳`);
+          await sendSafeReply(msg, chatId, `📥 *Fetching & downloading Instagram Reel...* ⏳`);
           const dlResult = await downloadInstagramReel(query);
 
           if (dlResult && dlResult.buffer) {
@@ -323,7 +320,7 @@ _Status: 24/7 Cloud Active_ ⚡
               caption: `🎥 *INSTAGRAM REEL DOWNLOADED*\n\n👑 _Downloaded by ${config.botName}_`,
             });
           } else {
-            await sendSafeReply(msg, chatId, `⚠️ Reel download nahi ho saki. Kripya check karein ki link public ho.`);
+            await sendSafeReply(msg, chatId, `⚠️ Reel download nahi ho saki. Kripya check karein ki reel public ho.`);
           }
           break;
         }
@@ -449,13 +446,15 @@ _Status: 24/7 Cloud Active_ ⚡
           break;
         }
 
-        // Auto-reply
+        // Auto-reply Toggle (with 1-time tracking reset)
         case 'autoreply': {
           if (args[0] === 'on') {
             autoReplyEnabled = true;
-            await sendSafeReply(msg, chatId, `✅ *Smart AI Assistant Away-Mode is now ON!*`);
+            autoRepliedUsers.clear(); // Reset 1-time tracker for new away session
+            await sendSafeReply(msg, chatId, `✅ *Smart AI Assistant Away-Mode is now ON!*\nBot will reply *only once per person* while you are offline.`);
           } else if (args[0] === 'off') {
             autoReplyEnabled = false;
+            autoRepliedUsers.clear();
             await sendSafeReply(msg, chatId, `❌ *Smart AI Auto-Reply is now OFF.*`);
           } else {
             await sendSafeReply(msg, chatId, `Status: *${autoReplyEnabled ? 'ON' : 'OFF'}*\nUsage: \`${prefix}autoreply on/off\``);
@@ -546,9 +545,13 @@ _Status: 24/7 Cloud Active_ ⚡
       }
     }
 
-    // Ultra-Premium Away Message
+    // =========================================================================
+    // 🌟 1-TIME ONLY AWAY AUTO-REPLY MESSAGE (No repetitive spam)
+    // =========================================================================
     else if (autoReplyEnabled && !isGroup && !isFromMe && body) {
-      const awayMessage = `
+      if (!autoRepliedUsers.has(chatId)) {
+        autoRepliedUsers.add(chatId); // Mark user as replied!
+        const awayMessage = `
 ╭━━━━━━━━━━━━━━━━━━━━━━╮
   ⚡ *${config.botName.toUpperCase()} ASSISTANT* ⚡
 ╰━━━━━━━━━━━━━━━━━━━━━━╯
@@ -562,7 +565,8 @@ Main *${config.ownerName}* ka personal AI assistant hoon. Abhi ${config.ownerNam
 ────────────────────────
 👑 _${config.businessName}_
 `;
-      await sendSafeReply(msg, chatId, awayMessage);
+        await sendSafeReply(msg, chatId, awayMessage);
+      }
     }
   } catch (err) {
     console.error('Error handling message:', err);
