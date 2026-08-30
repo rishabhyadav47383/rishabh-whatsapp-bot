@@ -313,7 +313,15 @@ const client = new Client({
       '--no-default-browser-check',
       '--disable-background-timer-throttling',
       '--disable-renderer-backgrounding',
-      '--js-flags=--max-old-space-size=256',
+      '--disable-background-networking',
+      '--disable-sync',
+      '--disable-translate',
+      '--disable-speech-api',
+      '--disable-domain-reliability',
+      '--disable-component-update',
+      '--disk-cache-size=0',
+      '--media-cache-size=0',
+      '--js-flags=--max-old-space-size=128',
     ],
   },
 });
@@ -347,15 +355,15 @@ client.on('disconnected', (reason) => {
   console.log('[!] Client was disconnected:', reason);
 });
 
-// Helper to safely send reply
+// Helper to safely send reply instantly without DOM locks
 async function sendSafeReply(msg, chatId, text, options = {}) {
   try {
-    return await msg.reply(text);
+    return await client.sendMessage(chatId, text, options);
   } catch (err) {
     try {
-      return await client.sendMessage(chatId, text, options);
+      return await msg.reply(text);
     } catch (e) {
-      console.error('Failed to send reply:', e);
+      console.error('Failed to send reply:', e.message);
     }
   }
 }
