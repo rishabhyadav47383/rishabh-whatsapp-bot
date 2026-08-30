@@ -49,6 +49,14 @@ let latestPairingCode = null;
 
 // Built-in Web Portal (Live QR + Pairing Code)
 const PORT = process.env.PORT || 8000;
+
+// 24/7 Cloud Heartbeat: Keeps Render active and awake forever
+setInterval(() => {
+  https.get('https://rishabh-whatsapp-bot.onrender.com/api/status', (res) => {
+    // Keep alive ping
+  }).on('error', () => {});
+}, 10 * 60 * 1000); // Every 10 mins
+
 const server = http.createServer(async (req, res) => {
   const parsedUrl = url.parse(req.url, true);
 
