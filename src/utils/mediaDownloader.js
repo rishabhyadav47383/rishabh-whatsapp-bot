@@ -74,7 +74,7 @@ export async function generateAiImage(prompt) {
 }
 
 /**
- * Download YouTube MP3 Audio or Video (MP4) using Android Client Emulation
+ * Download YouTube MP3 Audio or Video (MP4) with Web + Android JS runtime
  */
 export async function downloadYouTube(url, type = 'mp3') {
   return new Promise((resolve) => {
@@ -86,25 +86,20 @@ export async function downloadYouTube(url, type = 'mp3') {
 
       const formatArg = type === 'mp3' 
         ? `-f "140/ba/b" --extract-audio --audio-format mp3`
-        : `-f "18/best[height<=480]/best[ext=mp4]/best"`;
+        : `-f "18/b[ext=mp4]/best"`;
 
-      const cmd = `yt-dlp --extractor-args "youtube:player_client=android" ${formatArg} --no-playlist --max-filesize 50M -o "${outPath}" "${cleanUrl}"`;
+      const cmd = `yt-dlp --js-runtimes node --extractor-args "youtube:player_client=web,android" ${formatArg} --no-playlist --max-filesize 50M -o "${outPath}" "${cleanUrl}"`;
 
-      exec(cmd, (error, stdout, stderr) => {
-        if (error) {
-          console.error('yt-dlp error:', error.message);
-          // Fallback command without audio extraction if mp3 failed
-          const fallbackCmd = `yt-dlp --extractor-args "youtube:player_client=android" -f "18/b" -o "${outPath}" "${cleanUrl}"`;
+      exec(cmd, (error) => {
+        if (error || !fs.existsSync(outPath)) {
+          // Fallback command
+          const fallbackCmd = `yt-dlp --js-runtimes node --extractor-args "youtube:player_client=android,web" -f "18/b" --no-playlist -o "${outPath}" "${cleanUrl}"`;
           return exec(fallbackCmd, (fbErr) => {
             if (fbErr || !fs.existsSync(outPath)) return resolve(null);
             const buffer = fs.readFileSync(outPath);
             try { fs.unlinkSync(outPath); } catch (e) {}
             return resolve({ buffer, title: 'YouTube Media' });
           });
-        }
-
-        if (!fs.existsSync(outPath)) {
-          return resolve(null);
         }
 
         const buffer = fs.readFileSync(outPath);
