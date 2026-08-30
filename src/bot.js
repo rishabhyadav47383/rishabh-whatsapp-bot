@@ -45,6 +45,8 @@ let currentAiMode = 'default';
 const chatHistoryMap = new Map();
 const autoRepliedUsers = new Set();
 
+let latestPairingCode = null;
+
 // Built-in Web Portal (Live QR + Pairing Code)
 const PORT = process.env.PORT || 8000;
 const server = http.createServer(async (req, res) => {
@@ -72,20 +74,24 @@ const server = http.createServer(async (req, res) => {
       return res.end(JSON.stringify({ success: false, error: 'Kripya valid phone number daalein (e.g. 919876543210)' }));
     }
 
+    latestPairingCode = null;
+    let codeResult = null;
     try {
       if (typeof client.requestPairingCode === 'function') {
-        const code = await client.requestPairingCode(cleanPhone);
-        console.log(`[📲 PAIRING CODE] Generated code for ${cleanPhone}: ${code}`);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ success: true, code: code }));
-      } else {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ success: false, error: 'Pairing code not available on this engine. Kripya QR scan karein.' }));
+        codeResult = await client.requestPairingCode(cleanPhone);
       }
     } catch (pairErr) {
-      console.error('Pairing Code Error:', pairErr);
+      console.log('Pairing evaluation warning (non-fatal):', pairErr.message);
+    }
+
+    const finalCode = codeResult || latestPairingCode;
+    if (finalCode) {
+      console.log(`[📲 PAIRING CODE SUCCESS] Generated code for ${cleanPhone}: ${finalCode}`);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: true, code: finalCode }));
+    } else {
       res.writeHead(500, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ success: false, error: pairErr.message }));
+      return res.end(JSON.stringify({ success: false, error: 'Pairing code generate nahi ho saka. Kripya QR tab se scan karein.' }));
     }
   }
 
@@ -286,6 +292,11 @@ client.on('qr', (qr) => {
   latestQr = qr;
   console.log('\n📲 [QR CODE GENERATED] Live on Web Portal & Terminal:');
   qrcode.generate(qr, { small: true });
+});
+
+client.on('code', (code) => {
+  latestPairingCode = code;
+  console.log('\n📲 [PAIRING CODE RECEIVED]:', code);
 });
 
 client.on('ready', () => {
