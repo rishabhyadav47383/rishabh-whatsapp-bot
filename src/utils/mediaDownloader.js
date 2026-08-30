@@ -14,7 +14,7 @@ export function fetchBuffer(url) {
     const client = url.startsWith('https') ? https : http;
     client.get(url, { 
       headers: { 
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         'Accept': '*/*'
       } 
     }, (res) => {
@@ -74,65 +74,49 @@ export async function generateAiImage(prompt) {
 }
 
 /**
- * Core Media Downloader using yt-dlp with Node.js JS Runtime (Guaranteed YouTube / Media Download)
- */
-function downloadMediaWithEngine(url, type = 'mp3') {
-  return new Promise((resolve) => {
-    const tmpDir = os.tmpdir();
-    const outName = `ytdl_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
-    const outPath = path.join(tmpDir, `${outName}.%(ext)s`);
-
-    let formatArg = '';
-    if (type === 'mp3') {
-      formatArg = `-f "ba/b" -x --audio-format mp3`;
-    } else {
-      formatArg = `-f "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best" --merge-output-format mp4`;
-    }
-
-    const cmd = `yt-dlp --js-runtimes node ${formatArg} -o "${outPath}" --no-playlist --max-filesize 60M "${url}"`;
-
-    exec(cmd, (error, stdout, stderr) => {
-      if (error) {
-        console.error('yt-dlp download error:', error.message);
-        if (type !== 'mp3') {
-          const fbCmd = `yt-dlp --js-runtimes node -f "b/best" -o "${outPath}" "${url}"`;
-          return exec(fbCmd, (fbErr) => {
-            if (fbErr) return resolve(null);
-            const files = fs.readdirSync(tmpDir).filter(f => f.startsWith(outName));
-            if (files.length === 0) return resolve(null);
-            const filePath = path.join(tmpDir, files[0]);
-            const buffer = fs.readFileSync(filePath);
-            try { fs.unlinkSync(filePath); } catch (e) {}
-            return resolve({ buffer, title: 'Media File' });
-          });
-        }
-        return resolve(null);
-      }
-
-      const files = fs.readdirSync(tmpDir).filter(f => f.startsWith(outName));
-      if (files.length === 0) {
-        return resolve(null);
-      }
-
-      const filePath = path.join(tmpDir, files[0]);
-      const buffer = fs.readFileSync(filePath);
-      try { fs.unlinkSync(filePath); } catch (e) {}
-
-      resolve({ buffer, title: 'Media File' });
-    });
-  });
-}
-
-/**
- * Download YouTube MP3 Audio or Video (MP4)
+ * Download YouTube MP3 Audio or Video (MP4) using Android Client Emulation
  */
 export async function downloadYouTube(url, type = 'mp3') {
-  try {
-    return await downloadMediaWithEngine(url, type);
-  } catch (err) {
-    console.error('YouTube download error:', err);
-    return null;
-  }
+  return new Promise((resolve) => {
+    try {
+      const cleanUrl = url.trim();
+      const tmpDir = os.tmpdir();
+      const outName = `ytdl_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+      const outPath = path.join(tmpDir, `${outName}.${type === 'mp3' ? 'mp3' : 'mp4'}`);
+
+      const formatArg = type === 'mp3' 
+        ? `-f "140/ba/b" --extract-audio --audio-format mp3`
+        : `-f "18/best[height<=480]/best[ext=mp4]/best"`;
+
+      const cmd = `yt-dlp --extractor-args "youtube:player_client=android" ${formatArg} --no-playlist --max-filesize 50M -o "${outPath}" "${cleanUrl}"`;
+
+      exec(cmd, (error, stdout, stderr) => {
+        if (error) {
+          console.error('yt-dlp error:', error.message);
+          // Fallback command without audio extraction if mp3 failed
+          const fallbackCmd = `yt-dlp --extractor-args "youtube:player_client=android" -f "18/b" -o "${outPath}" "${cleanUrl}"`;
+          return exec(fallbackCmd, (fbErr) => {
+            if (fbErr || !fs.existsSync(outPath)) return resolve(null);
+            const buffer = fs.readFileSync(outPath);
+            try { fs.unlinkSync(outPath); } catch (e) {}
+            return resolve({ buffer, title: 'YouTube Media' });
+          });
+        }
+
+        if (!fs.existsSync(outPath)) {
+          return resolve(null);
+        }
+
+        const buffer = fs.readFileSync(outPath);
+        try { fs.unlinkSync(outPath); } catch (e) {}
+
+        return resolve({ buffer, title: 'YouTube Media' });
+      });
+    } catch (err) {
+      console.error('YouTube download exception:', err);
+      resolve(null);
+    }
+  });
 }
 
 /**
