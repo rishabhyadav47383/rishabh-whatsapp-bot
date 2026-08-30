@@ -76,22 +76,45 @@ const server = http.createServer(async (req, res) => {
 
     latestPairingCode = null;
     let codeResult = null;
+
     try {
       if (typeof client.requestPairingCode === 'function') {
-        codeResult = await client.requestPairingCode(cleanPhone);
+        client.requestPairingCode(cleanPhone).then(c => { if (c) latestPairingCode = c; }).catch(() => {});
       }
     } catch (pairErr) {
-      console.log('Pairing evaluation warning (non-fatal):', pairErr.message);
+      console.log('Pairing dispatch note:', pairErr.message);
     }
 
-    const finalCode = codeResult || latestPairingCode;
+    // Wait up to 3 seconds for code to be generated and emitted
+    for (let i = 0; i < 15 && !latestPairingCode && !codeResult; i++) {
+      await new Promise(r => setTimeout(r, 200));
+      // DOM fallback extraction
+      if (!latestPairingCode && client.pupPage) {
+        try {
+          const domCode = await client.pupPage.evaluate(() => {
+            const el = document.querySelector('[data-testid="link-device-qrcode-alt-linking-code"]') || 
+                       document.querySelector('div[aria-details]') ||
+                       document.querySelector('div[data-ref]');
+            if (el && el.innerText) {
+              const cleaned = el.innerText.replace(/[^A-Z0-9]/gi, '');
+              if (cleaned.length >= 8) return cleaned.slice(0, 8);
+            }
+            return null;
+          });
+          if (domCode) latestPairingCode = domCode;
+        } catch (e) {}
+      }
+    }
+
+    const finalCode = latestPairingCode || codeResult;
     if (finalCode) {
-      console.log(`[📲 PAIRING CODE SUCCESS] Generated code for ${cleanPhone}: ${finalCode}`);
+      const formatted = finalCode.length === 8 ? `${finalCode.slice(0, 4)}-${finalCode.slice(4)}` : finalCode;
+      console.log(`[📲 PAIRING CODE SUCCESS] Generated code for ${cleanPhone}: ${formatted}`);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ success: true, code: finalCode }));
+      return res.end(JSON.stringify({ success: true, code: formatted }));
     } else {
       res.writeHead(500, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ success: false, error: 'Pairing code generate nahi ho saka. Kripya QR tab se scan karein.' }));
+      return res.end(JSON.stringify({ success: false, error: 'Pairing code generate nahi ho saka. Kripya "Scan QR Code" tab se QR scan karein.' }));
     }
   }
 
