@@ -1,4 +1,5 @@
 import http from 'http';
+import url from 'url';
 import https from 'https';
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth, MessageMedia } = pkg;
@@ -44,81 +45,192 @@ let currentAiMode = 'default';
 const chatHistoryMap = new Map();
 const autoRepliedUsers = new Set();
 
-// Built-in Web QR Code Server
+// Built-in Web Portal (Live QR + Pairing Code)
 const PORT = process.env.PORT || 8000;
-const server = http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-  if (isConnected) {
-    res.end(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>${config.botName} - Online</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-          body { background: #0f172a; color: white; font-family: sans-serif; text-align: center; padding: 40px 20px; }
-          .card { max-width: 480px; margin: 0 auto; background: #1e293b; border-radius: 24px; padding: 35px 25px; border: 1px solid #334155; }
-          .badge { background: #22c55e20; color: #4ade80; border: 1px solid #22c55e40; padding: 6px 16px; border-radius: 999px; font-weight: bold; }
-        </style>
-      </head>
-      <body>
-        <div class="card">
-          <h1>🤖 ${config.botName} (Pro)</h1>
-          <p class="badge">● 24/7 ACTIVE & CONNECTED</p>
-          <p style="color: #94a3b8; margin-top: 20px;">Created & Owned by <b>${config.ownerName}</b></p>
-        </div>
-      </body>
-      </html>
-    `);
-  } else if (latestQr) {
-    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(latestQr)}`;
-    res.end(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Scan QR - ${config.botName}</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <meta http-equiv="refresh" content="15">
-        <style>
-          body { background: #0b141a; color: white; font-family: sans-serif; text-align: center; padding: 30px 15px; }
-          .card { max-width: 420px; margin: 0 auto; background: #111b21; border-radius: 24px; padding: 25px; border: 1px solid #222e35; }
-          .qr-box { background: white; padding: 15px; border-radius: 16px; display: inline-block; margin: 20px 0; }
-          .steps { text-align: left; background: #202c33; padding: 15px 20px; border-radius: 14px; font-size: 13px; color: #d1d7db; line-height: 1.6; }
-        </style>
-      </head>
-      <body>
-        <div class="card">
-          <h2 style="margin: 0; color: #25d366;">📲 Link ${config.botName}</h2>
-          <p style="color: #8696a0; font-size: 13px; margin: 5px 0 15px;">Scan this QR code from WhatsApp on your phone</p>
-          <div class="qr-box">
-            <img src="${qrImageUrl}" alt="WhatsApp QR Code" width="260" height="260" style="display:block;" />
-          </div>
-          <div class="steps">
-            <b>How to scan:</b><br/>
-            1. Open WhatsApp on your phone<br/>
-            2. Tap <b>Settings / 3-Dots > Linked Devices</b><br/>
-            3. Tap <b>Link a Device</b> and point at this QR
-          </div>
-        </div>
-      </body>
-      </html>
-    `);
-  } else {
-    res.end(`
-      <!DOCTYPE html>
-      <html>
-      <head><meta http-equiv="refresh" content="3"></head>
-      <body style="background:#0f172a;color:white;font-family:sans-serif;text-align:center;padding:50px;">
-        <h2>⏳ Starting WhatsApp engine...</h2>
-        <p style="color:#94a3b8;">Generating QR code, please wait 5 seconds...</p>
-      </body>
-      </html>
-    `);
+const server = http.createServer(async (req, res) => {
+  const parsedUrl = url.parse(req.url, true);
+
+  // Status API for smooth background polling (No page flickering!)
+  if (parsedUrl.pathname === '/api/status') {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    return res.end(JSON.stringify({
+      connected: isConnected,
+      hasQr: !!latestQr,
+      qrUrl: latestQr ? `https://api.qrserver.com/v1/create-qr-code/?size=350x350&data=${encodeURIComponent(latestQr)}` : null,
+      botName: config.botName,
+      owner: config.ownerName
+    }));
   }
+
+  // Request Pairing Code API
+  if (parsedUrl.pathname === '/api/pair') {
+    const rawPhone = parsedUrl.query.phone || '';
+    const cleanPhone = rawPhone.replace(/[^0-9]/g, '');
+
+    if (!cleanPhone || cleanPhone.length < 10) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: false, error: 'Kripya valid phone number daalein (e.g. 919876543210)' }));
+    }
+
+    try {
+      if (typeof client.requestPairingCode === 'function') {
+        const code = await client.requestPairingCode(cleanPhone);
+        console.log(`[📲 PAIRING CODE] Generated code for ${cleanPhone}: ${code}`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: true, code: code }));
+      } else {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: false, error: 'Pairing code not available on this engine. Kripya QR scan karein.' }));
+      }
+    } catch (pairErr) {
+      console.error('Pairing Code Error:', pairErr);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: false, error: pairErr.message }));
+    }
+  }
+
+  // Main Luxury Web Portal UI
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>${config.botName} - Cloud Portal</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>
+        * { box-sizing: border-box; }
+        body { background: #0b141a; color: white; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; padding: 25px 15px; margin: 0; }
+        .card { max-width: 460px; margin: 0 auto; background: #111b21; border-radius: 28px; padding: 30px 24px; border: 1px solid #222e35; box-shadow: 0 20px 40px rgba(0,0,0,0.6); }
+        .badge { background: #22c55e20; color: #4ade80; border: 1px solid #22c55e40; padding: 8px 20px; border-radius: 999px; font-weight: bold; font-size: 14px; display: inline-block; }
+        .qr-box { background: white; padding: 15px; border-radius: 20px; display: inline-block; margin: 15px 0; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
+        .qr-box img { display: block; width: 270px; height: 270px; }
+        .tabs { display: flex; gap: 8px; margin: 20px 0 15px; background: #202c33; padding: 5px; border-radius: 14px; }
+        .tab-btn { flex: 1; padding: 10px; border: none; background: transparent; color: #8696a0; font-weight: bold; border-radius: 10px; cursor: pointer; transition: 0.2s; }
+        .tab-btn.active { background: #00a884; color: white; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        input { width: 100%; padding: 14px; border-radius: 12px; border: 1px solid #334155; background: #202c33; color: white; font-size: 16px; margin-bottom: 12px; text-align: center; }
+        button.action-btn { width: 100%; padding: 14px; border-radius: 12px; border: none; background: #00a884; color: white; font-size: 16px; font-weight: bold; cursor: pointer; }
+        .code-display { font-size: 32px; font-weight: 900; letter-spacing: 6px; color: #fbbf24; background: #1e293b; padding: 18px; border-radius: 14px; border: 2px dashed #fbbf2480; margin: 15px 0; }
+        .steps { text-align: left; background: #202c33; padding: 15px 18px; border-radius: 14px; font-size: 13px; color: #d1d7db; line-height: 1.6; margin-top: 15px; }
+      </style>
+    </head>
+    <body>
+      <div class="card" id="app">
+        <h2 style="margin: 0; color: #25d366;">🤖 ${config.botName}</h2>
+        <p style="color: #8696a0; font-size: 13px; margin: 4px 0 15px;">Official 24/7 WhatsApp Cloud Engine</p>
+
+        <div id="onlineState" style="display: none;">
+          <div style="margin: 30px 0;">
+            <p class="badge">● 24/7 ACTIVE & CONNECTED</p>
+            <h3 style="color: #e2e8f0; margin-top: 20px;">🎉 Bot is Running Successfully!</h3>
+            <p style="color: #94a3b8; font-size: 14px;">Creator & Owner: <b>${config.ownerName}</b></p>
+            <p style="color: #64748b; font-size: 12px;">You can close this tab and turn off your PC anytime.</p>
+          </div>
+        </div>
+
+        <div id="loginState">
+          <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('qrTab')">📲 Scan QR Code</button>
+            <button class="tab-btn" onclick="switchTab('phoneTab')">🔢 Link with Phone Number</button>
+          </div>
+
+          <!-- TAB 1: QR CODE (Smooth Auto-Updating) -->
+          <div id="qrTab" class="tab-content active">
+            <div id="qrHolder">
+              <div class="qr-box">
+                <img id="qrImg" src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=WAITING" alt="QR Code" />
+              </div>
+              <p style="color: #8696a0; font-size: 12px; margin: 5px 0;">● Live QR Code (Auto-refreshes seamlessly)</p>
+            </div>
+            <div class="steps">
+              <b>How to scan:</b><br/>
+              1. Open WhatsApp on your phone<br/>
+              2. Tap <b>Settings (3-dots) > Linked Devices</b><br/>
+              3. Tap <b>Link a Device</b> & scan this QR Code
+            </div>
+          </div>
+
+          <!-- TAB 2: PHONE NUMBER PAIRING CODE -->
+          <div id="phoneTab" class="tab-content">
+            <p style="color: #8696a0; font-size: 13px; margin: 10px 0;">Enter your WhatsApp phone number with country code (e.g. <b>919876543210</b>):</p>
+            <input type="tel" id="phoneNumber" placeholder="919876543210" />
+            <button class="action-btn" id="pairBtn" onclick="requestPairing()">Get 8-Digit Pairing Code</button>
+            
+            <div id="pairResult" style="display: none;">
+              <p style="color: #38bdf8; font-weight: bold; margin-top: 15px;">Your WhatsApp Pairing Code:</p>
+              <div class="code-display" id="codeText">---- ----</div>
+              <div class="steps">
+                <b>Next Steps on Phone:</b><br/>
+                1. Open WhatsApp > <b>Linked Devices > Link a Device</b><br/>
+                2. Tap <b>"Link with phone number instead"</b> at bottom<br/>
+                3. Enter the 8-digit code above!
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <script>
+        function switchTab(tabId) {
+          document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+          document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+          event.target.classList.add('active');
+          document.getElementById(tabId).classList.add('active');
+        }
+
+        async function requestPairing() {
+          const phone = document.getElementById('phoneNumber').value.trim();
+          if (!phone) return alert('Kripya apna phone number daalein!');
+          const btn = document.getElementById('pairBtn');
+          btn.innerText = 'Generating Code... ⏳';
+          btn.disabled = true;
+
+          try {
+            const res = await fetch('/api/pair?phone=' + encodeURIComponent(phone));
+            const data = await res.json();
+            if (data.success && data.code) {
+              document.getElementById('codeText').innerText = data.code;
+              document.getElementById('pairResult').style.display = 'block';
+            } else {
+              alert('Error: ' + (data.error || 'Failed to get code. Kripya QR tab se scan karein.'));
+            }
+          } catch(e) {
+            alert('Failed to connect to server.');
+          } finally {
+            btn.innerText = 'Get 8-Digit Pairing Code';
+            btn.disabled = false;
+          }
+        }
+
+        // Live smooth status polling (No page reload flickering!)
+        setInterval(async () => {
+          try {
+            const res = await fetch('/api/status');
+            const data = await res.json();
+            if (data.connected) {
+              document.getElementById('loginState').style.display = 'none';
+              document.getElementById('onlineState').style.display = 'block';
+            } else {
+              document.getElementById('loginState').style.display = 'block';
+              document.getElementById('onlineState').style.display = 'none';
+              if (data.qrUrl) {
+                const img = document.getElementById('qrImg');
+                if (img.src !== data.qrUrl) {
+                  img.src = data.qrUrl;
+                }
+              }
+            }
+          } catch(e) {}
+        }, 2500);
+      </script>
+    </body>
+    </html>
+  `);
 });
 
 server.listen(PORT, () => {
-  console.log(`[*] Web QR Viewer running on port ${PORT}`);
+  console.log(`[*] Web Portal (Live QR + Pairing Code) running on port ${PORT}`);
 });
 
 // Detect Google Chrome on Linux / Docker
@@ -138,7 +250,7 @@ function getTtsBuffer(text, lang = 'hi') {
   });
 }
 
-// WhatsApp Client
+// WhatsApp Client with optimized memory & stability
 const client = new Client({
   authStrategy: new LocalAuth({
     dataPath: './wwebjs_auth',
@@ -172,7 +284,7 @@ const client = new Client({
 // Events
 client.on('qr', (qr) => {
   latestQr = qr;
-  console.log('\n📲 [QR CODE GENERATED] Terminal QR:');
+  console.log('\n📲 [QR CODE GENERATED] Live on Web Portal & Terminal:');
   qrcode.generate(qr, { small: true });
 });
 
@@ -217,9 +329,7 @@ client.on('message_create', async (msg) => {
     const isFromMe = msg.fromMe;
     const sender = isFromMe ? config.ownerName : (msg.author || msg.from).replace(/@.+/, '');
 
-    // =========================================================================
-    // 👁️ ANTI-VIEW ONCE AUTO CAPTURE
-    // =========================================================================
+    // Anti-ViewOnce Auto Capture
     const isViewOnce = msg.isViewOnce || 
                        msg._data?.isViewOnce || 
                        msg._data?.viewOnce ||
@@ -342,7 +452,7 @@ _AI Mode: [${currentAiMode.toUpperCase()}]_ ⚡
                 caption: `👁️ *[VIEW-ONCE REVEALED]*\nUnlocked secret View-Once media!\n\n👑 _Decrypted by ${config.botName}_`,
               });
             } else {
-              await sendSafeReply(msg, chatId, '⚠️ Media download nahi ho saki.');
+              await sendSafeReply(msg, chatId, '⚠️ Media download nahi ho saki. Kripya ensure karein photo chat me maujood ho.');
             }
           } catch (err) {
             await sendSafeReply(msg, chatId, `⚠️ Error decrypting: ${err.message}`);
@@ -718,7 +828,7 @@ _AI Mode: [${currentAiMode.toUpperCase()}]_ ⚡
       }
     }
 
-    // 1-Time Auto-Reply Away Message (Option 3: Modern Tech Minimalist)
+    // 1-Time Auto-Reply Away Message
     else if (autoReplyEnabled && !isGroup && !isFromMe && body) {
       const userKey = (msg.from || chatId).replace(/@.+/, '');
       if (!autoRepliedUsers.has(chatId) && !autoRepliedUsers.has(userKey)) {
